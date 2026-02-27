@@ -30,6 +30,7 @@ onMounted(() => {
     automaticLayout: true,
     renderSideBySide: !inline.value,
     readOnly: false,
+    originalEditable: true,
     minimap: { enabled: false },
     fontSize: 14,
     lineNumbers: 'on',
