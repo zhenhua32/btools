@@ -2,3 +2,4 @@
 import './text-diff'
 import './json-formatter'
 import './encoding'
+import './bookmark-checker'
