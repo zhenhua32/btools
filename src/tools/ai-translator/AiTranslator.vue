@@ -381,10 +381,8 @@ function openSettings() {
       <NCard v-else size="small" title="译文" class="flow-card">
         <div v-if="paragraphRows.length > 0" class="flowing-content">
           <div v-for="(row, index) in paragraphRows" :key="`${index}-${row.original}-${row.translated}`" class="flow-pair">
-            <div class="flow-label">原文</div>
-            <p class="flowing-paragraph flow-original">{{ row.original || ' ' }}</p>
-            <div class="flow-label">译文</div>
-            <p class="flowing-paragraph flow-translated">{{ row.translated || ' ' }}</p>
+            <div class="flow-block flow-original">{{ row.original || ' ' }}</div>
+            <div class="flow-block flow-translated">{{ row.translated || ' ' }}</div>
           </div>
         </div>
         <NEmpty v-else description="译文会以自然段落流方式显示在这里" />
@@ -441,19 +439,20 @@ function openSettings() {
   border-bottom: 0;
 }
 
-.flow-label {
-  margin-bottom: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #6b7280;
+.flow-block {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  line-height: 1.75;
 }
 
-.flowing-paragraph {
-  margin: 0 0 12px;
-  white-space: pre-wrap;
+.flow-original {
+  background: #f8fafc;
 }
 
 .flow-translated {
+  background: #f7fdf9;
   margin-bottom: 0;
 }
 
