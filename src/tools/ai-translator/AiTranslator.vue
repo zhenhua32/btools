@@ -71,13 +71,6 @@ const resultText = computed(() => {
 
   return translatedParagraphs.value.join('\n\n')
 })
-const flowingParagraphs = computed(() => {
-  if (resultParagraphs.value.length > 0) {
-    return resultParagraphs.value
-  }
-
-  return resultText.value.trim() ? [resultText.value.trim()] : []
-})
 const configSummary = computed(() => {
   if (!isAiSettingsConfigured(cachedSettings.value)) {
     return '模型未配置'
@@ -386,10 +379,13 @@ function openSettings() {
       </NCard>
 
       <NCard v-else size="small" title="译文" class="flow-card">
-        <div v-if="flowingParagraphs.length > 0" class="flowing-content">
-          <p v-for="(paragraph, index) in flowingParagraphs" :key="`${index}-${paragraph}`" class="flowing-paragraph">
-            {{ paragraph }}
-          </p>
+        <div v-if="paragraphRows.length > 0" class="flowing-content">
+          <div v-for="(row, index) in paragraphRows" :key="`${index}-${row.original}-${row.translated}`" class="flow-pair">
+            <div class="flow-label">原文</div>
+            <p class="flowing-paragraph flow-original">{{ row.original || ' ' }}</p>
+            <div class="flow-label">译文</div>
+            <p class="flowing-paragraph flow-translated">{{ row.translated || ' ' }}</p>
+          </div>
         </div>
         <NEmpty v-else description="译文会以自然段落流方式显示在这里" />
       </NCard>
@@ -433,12 +429,31 @@ function openSettings() {
   line-height: 1.75;
 }
 
+.flow-pair {
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.flow-pair:last-child {
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-bottom: 0;
+}
+
+.flow-label {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+}
+
 .flowing-paragraph {
-  margin: 0 0 16px;
+  margin: 0 0 12px;
   white-space: pre-wrap;
 }
 
-.flowing-paragraph:last-child {
+.flow-translated {
   margin-bottom: 0;
 }
 
