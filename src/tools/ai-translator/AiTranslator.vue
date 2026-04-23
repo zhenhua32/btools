@@ -364,13 +364,15 @@ function openSettings() {
             <div class="aligned-title">原文</div>
             <div class="aligned-title">译文</div>
           </div>
-          <div v-for="(row, index) in paragraphRows" :key="`${index}-${row.original}-${row.translated}`" class="aligned-row">
+          <div
+            v-for="(row, index) in paragraphRows"
+            :key="`${index}-${row.original}-${row.translated}`"
+            :class="['aligned-row', index % 2 === 0 ? 'aligned-row-even' : 'aligned-row-odd']"
+          >
             <div class="aligned-cell">
-              <div class="paragraph-index">第 {{ index + 1 }} 段</div>
               <div class="paragraph-text">{{ row.original || ' ' }}</div>
             </div>
             <div class="aligned-cell">
-              <div class="paragraph-index">第 {{ index + 1 }} 段</div>
               <div class="paragraph-text">{{ row.translated || ' ' }}</div>
             </div>
           </div>
@@ -481,24 +483,25 @@ function openSettings() {
 }
 
 .aligned-row {
-  padding-bottom: 10px;
-  border-bottom: 1px solid #f3f4f6;
+  margin-bottom: 10px;
 }
 
 .aligned-row:last-child {
-  border-bottom: 0;
-  padding-bottom: 0;
+  margin-bottom: 0;
 }
 
 .aligned-cell {
   min-width: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
 }
 
-.paragraph-index {
-  margin-bottom: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #6b7280;
+.aligned-row-even .aligned-cell {
+  background: #f8fafc;
+}
+
+.aligned-row-odd .aligned-cell {
+  background: #f7fbf8;
 }
 
 .paragraph-text {
