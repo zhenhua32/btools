@@ -6,8 +6,6 @@ import {
   NButton,
   NCard,
   NEmpty,
-  NGrid,
-  NGi,
   NInput,
   NSelect,
   NSpace,
@@ -73,6 +71,13 @@ const resultText = computed(() => {
 
   return translatedParagraphs.value.join('\n\n')
 })
+const flowingParagraphs = computed(() => {
+  if (resultParagraphs.value.length > 0) {
+    return resultParagraphs.value
+  }
+
+  return resultText.value.trim() ? [resultText.value.trim()] : []
+})
 const configSummary = computed(() => {
   if (!isAiSettingsConfigured(cachedSettings.value)) {
     return '模型未配置'
@@ -129,12 +134,9 @@ async function translateText() {
 
 async function translateWholeDocument(text: string) {
   infoMsg.value = '正在整块翻译，请稍候...'
-  const response = await requestAiChatCompletion(buildMessages(text, false), {
-    temperature: 0.2,
-    timeoutMs: 90000,
-  })
+  const cleaned = await requestTranslatedContent(text, false)
 
-  translatedText.value = response.content.trim()
+  translatedText.value = cleaned
   translatedParagraphs.value = splitParagraphs(translatedText.value)
 }
 
@@ -148,34 +150,130 @@ async function translateByParagraphs(text: string) {
 
   for (let i = 0; i < paragraphs.length; i++) {
     infoMsg.value = `正在翻译第 ${i + 1} / ${paragraphs.length} 段...`
-    const response = await requestAiChatCompletion(buildMessages(paragraphs[i], true), {
-      temperature: 0.2,
-      timeoutMs: 60000,
-    })
-    results.push(response.content.trim())
+    results.push(await requestTranslatedContent(paragraphs[i], true))
   }
 
   translatedParagraphs.value = results
   translatedText.value = results.join('\n\n')
 }
 
-function buildMessages(text: string, singleParagraph: boolean): AiChatMessage[] {
+async function requestTranslatedContent(text: string, singleParagraph: boolean): Promise<string> {
+  const firstPass = await requestAiChatCompletion(buildMessages(text, singleParagraph), {
+    temperature: 0.2,
+    timeoutMs: singleParagraph ? 60000 : 90000,
+  })
+  const cleanedFirstPass = sanitizeTranslationOutput(text, firstPass.content)
+
+  if (!looksLikeSourceEcho(text, cleanedFirstPass, singleParagraph)) {
+    return cleanedFirstPass
+  }
+
+  const secondPass = await requestAiChatCompletion(buildMessages(text, singleParagraph, true), {
+    temperature: 0,
+    timeoutMs: singleParagraph ? 60000 : 90000,
+  })
+  const cleanedSecondPass = sanitizeTranslationOutput(text, secondPass.content)
+
+  if (!cleanedSecondPass.trim()) {
+    throw new Error('模型返回了空结果，请重试或调整提示词')
+  }
+
+  return cleanedSecondPass
+}
+
+function buildMessages(text: string, singleParagraph: boolean, retryWithoutEcho = false): AiChatMessage[] {
   const targetLanguage = cachedSettings.value.defaultTargetLanguage || '中文'
   const systemParts = [
     cachedSettings.value.systemPrompt,
     `将用户提供的文本翻译成${targetLanguage}。`,
     '保留原文的段落、换行、列表、Markdown 或代码块结构。',
     '只输出译文，不要解释，不要添加标题、备注或额外说明。',
+    '绝对不要重复、复制、附带或夹带原文。输出中禁止出现未翻译的原文段落，除非是必须保留的代码、标识符或专有格式片段。',
   ].filter(Boolean)
 
+  const retryNotice = retryWithoutEcho
+    ? '你上一条回答错误地包含了原文。这次只返回译文正文，不要重复原文，不要做双语对照。\n\n'
+    : ''
   const userPrompt = singleParagraph
-    ? `请翻译下面这一段内容，保持原意与格式：\n\n${text}`
-    : `请翻译下面的完整内容，并尽量保持原有段落结构：\n\n${text}`
+    ? `${retryNotice}请翻译下面这一段内容，保持原意与格式，只返回译文：\n\n${text}`
+    : `${retryNotice}请翻译下面的完整内容，并尽量保持原有段落结构，只返回译文：\n\n${text}`
 
   return [
     { role: 'system', content: systemParts.join('\n') },
     { role: 'user', content: userPrompt },
   ]
+}
+
+function sanitizeTranslationOutput(source: string, output: string): string {
+  let candidate = output.trim()
+  const trimmedSource = source.trim()
+
+  if (!candidate) {
+    return ''
+  }
+
+  if (candidate.startsWith(trimmedSource)) {
+    candidate = candidate.slice(trimmedSource.length).trimStart()
+    candidate = candidate.replace(/^[:：\-\n\s]+/, '').trim()
+  }
+
+  const sourceParas = splitParagraphs(source)
+  const outputParas = splitParagraphs(candidate)
+  let leadingEchoCount = 0
+
+  while (
+    leadingEchoCount < sourceParas.length &&
+    leadingEchoCount < outputParas.length &&
+    normalizeComparableText(sourceParas[leadingEchoCount]) ===
+      normalizeComparableText(outputParas[leadingEchoCount])
+  ) {
+    leadingEchoCount += 1
+  }
+
+  if (leadingEchoCount > 0) {
+    const stripped = outputParas.slice(leadingEchoCount).join('\n\n').trim()
+    if (stripped) {
+      candidate = stripped
+    }
+  }
+
+  return candidate.trim()
+}
+
+function looksLikeSourceEcho(source: string, output: string, singleParagraph: boolean): boolean {
+  const normalizedSource = normalizeComparableText(source)
+  const normalizedOutput = normalizeComparableText(output)
+
+  if (!normalizedOutput) {
+    return true
+  }
+
+  if (normalizedOutput === normalizedSource) {
+    return true
+  }
+
+  if (!singleParagraph && normalizedOutput.startsWith(normalizedSource)) {
+    return true
+  }
+
+  const sourceParas = splitParagraphs(source)
+  const outputParas = splitParagraphs(output)
+  let sharedLeadingParas = 0
+
+  while (
+    sharedLeadingParas < sourceParas.length &&
+    sharedLeadingParas < outputParas.length &&
+    normalizeComparableText(sourceParas[sharedLeadingParas]) ===
+      normalizeComparableText(outputParas[sharedLeadingParas])
+  ) {
+    sharedLeadingParas += 1
+  }
+
+  return singleParagraph ? sharedLeadingParas > 0 : sharedLeadingParas >= 1
+}
+
+function normalizeComparableText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().toLowerCase()
 }
 
 function splitParagraphs(text: string): string[] {
@@ -256,36 +354,7 @@ function openSettings() {
       {{ infoMsg }}
     </NAlert>
 
-    <div v-if="displayMode === 'side-by-side'" class="translator-panels">
-      <NGrid :cols="2" :x-gap="12">
-        <NGi>
-          <NCard size="small" title="原文">
-            <NInput
-              v-model:value="sourceText"
-              type="textarea"
-              placeholder="输入要翻译的文本，默认译入中文..."
-              :autosize="{ minRows: 18 }"
-              class="source-input"
-            />
-          </NCard>
-        </NGi>
-
-        <NGi>
-          <NCard size="small" title="译文">
-            <NInput
-              :value="resultText"
-              type="textarea"
-              placeholder="译文会显示在这里..."
-              :autosize="{ minRows: 18 }"
-              readonly
-              class="source-input"
-            />
-          </NCard>
-        </NGi>
-      </NGrid>
-    </div>
-
-    <div v-else class="translator-paragraph-mode">
+    <div class="translator-content">
       <NCard size="small" title="原文" class="source-card">
         <NInput
           v-model:value="sourceText"
@@ -296,7 +365,7 @@ function openSettings() {
         />
       </NCard>
 
-      <NCard size="small" title="原文 / 译文对照" class="paragraph-card">
+      <NCard v-if="displayMode === 'side-by-side'" size="small" title="原文 / 译文对照" class="paragraph-card">
         <div v-if="paragraphRows.length > 0" class="aligned-paragraphs">
           <div class="aligned-header">
             <div class="aligned-title">原文</div>
@@ -314,6 +383,15 @@ function openSettings() {
           </div>
         </div>
         <NEmpty v-else description="翻译结果会按左右对照方式显示在这里" />
+      </NCard>
+
+      <NCard v-else size="small" title="译文" class="flow-card">
+        <div v-if="flowingParagraphs.length > 0" class="flowing-content">
+          <p v-for="(paragraph, index) in flowingParagraphs" :key="`${index}-${paragraph}`" class="flowing-paragraph">
+            {{ paragraph }}
+          </p>
+        </div>
+        <NEmpty v-else description="译文会以自然段落流方式显示在这里" />
       </NCard>
     </div>
   </div>
@@ -336,11 +414,7 @@ function openSettings() {
   color: #9ca3af;
 }
 
-.translator-panels {
-  flex-shrink: 0;
-}
-
-.translator-paragraph-mode {
+.translator-content {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -352,6 +426,20 @@ function openSettings() {
 
 .source-input :deep(textarea) {
   resize: vertical;
+}
+
+.flowing-content {
+  color: #111827;
+  line-height: 1.75;
+}
+
+.flowing-paragraph {
+  margin: 0 0 16px;
+  white-space: pre-wrap;
+}
+
+.flowing-paragraph:last-child {
+  margin-bottom: 0;
 }
 
 .aligned-paragraphs {
