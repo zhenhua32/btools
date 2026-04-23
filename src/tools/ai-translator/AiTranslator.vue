@@ -51,12 +51,20 @@ onActivated(() => loadSettingsSnapshot(false))
 const canTranslate = computed(() => !!sourceText.value.trim() && !loading.value)
 const canCopyResult = computed(() => !!resultText.value.trim())
 const missingSettingLabels = computed(() => getMissingAiSettingLabels(cachedSettings.value))
+const sourceParagraphs = computed(() => splitParagraphs(sourceText.value))
 const resultParagraphs = computed(() => {
   if (translatedParagraphs.value.length > 0) {
     return translatedParagraphs.value
   }
 
   return splitParagraphs(translatedText.value)
+})
+const paragraphRows = computed(() => {
+  const total = Math.max(sourceParagraphs.value.length, resultParagraphs.value.length)
+  return Array.from({ length: total }, (_, index) => ({
+    original: sourceParagraphs.value[index] || '',
+    translated: resultParagraphs.value[index] || '',
+  }))
 })
 const resultText = computed(() => {
   if (translatedText.value.trim()) {
@@ -248,40 +256,66 @@ function openSettings() {
       {{ infoMsg }}
     </NAlert>
 
-    <NGrid :cols="2" :x-gap="12" class="translator-panels">
-      <NGi>
-        <NCard size="small" title="原文">
-          <NInput
-            v-model:value="sourceText"
-            type="textarea"
-            placeholder="输入要翻译的文本，默认译入中文..."
-            :rows="18"
-          />
-        </NCard>
-      </NGi>
+    <div v-if="displayMode === 'side-by-side'" class="translator-panels">
+      <NGrid :cols="2" :x-gap="12">
+        <NGi>
+          <NCard size="small" title="原文">
+            <NInput
+              v-model:value="sourceText"
+              type="textarea"
+              placeholder="输入要翻译的文本，默认译入中文..."
+              :autosize="{ minRows: 18 }"
+              class="source-input"
+            />
+          </NCard>
+        </NGi>
 
-      <NGi>
-        <NCard v-if="displayMode === 'side-by-side'" size="small" title="译文">
-          <NInput
-            :value="resultText"
-            type="textarea"
-            placeholder="译文会显示在这里..."
-            :rows="18"
-            readonly
-          />
-        </NCard>
+        <NGi>
+          <NCard size="small" title="译文">
+            <NInput
+              :value="resultText"
+              type="textarea"
+              placeholder="译文会显示在这里..."
+              :autosize="{ minRows: 18 }"
+              readonly
+              class="source-input"
+            />
+          </NCard>
+        </NGi>
+      </NGrid>
+    </div>
 
-        <NCard v-else size="small" title="段落译文" class="paragraph-card">
-          <div v-if="resultParagraphs.length > 0" class="paragraph-list">
-            <div v-for="(paragraph, index) in resultParagraphs" :key="`${index}-${paragraph}`" class="paragraph-item">
+    <div v-else class="translator-paragraph-mode">
+      <NCard size="small" title="原文" class="source-card">
+        <NInput
+          v-model:value="sourceText"
+          type="textarea"
+          placeholder="输入要翻译的文本，默认译入中文..."
+          :autosize="{ minRows: 18 }"
+          class="source-input"
+        />
+      </NCard>
+
+      <NCard size="small" title="原文 / 译文对照" class="paragraph-card">
+        <div v-if="paragraphRows.length > 0" class="aligned-paragraphs">
+          <div class="aligned-header">
+            <div class="aligned-title">原文</div>
+            <div class="aligned-title">译文</div>
+          </div>
+          <div v-for="(row, index) in paragraphRows" :key="`${index}-${row.original}-${row.translated}`" class="aligned-row">
+            <div class="aligned-cell">
               <div class="paragraph-index">第 {{ index + 1 }} 段</div>
-              <div class="paragraph-text">{{ paragraph }}</div>
+              <div class="paragraph-text">{{ row.original || ' ' }}</div>
+            </div>
+            <div class="aligned-cell">
+              <div class="paragraph-index">第 {{ index + 1 }} 段</div>
+              <div class="paragraph-text">{{ row.translated || ' ' }}</div>
             </div>
           </div>
-          <NEmpty v-else description="翻译结果会按段落显示在这里" />
-        </NCard>
-      </NGi>
-    </NGrid>
+        </div>
+        <NEmpty v-else description="翻译结果会按左右对照方式显示在这里" />
+      </NCard>
+    </div>
   </div>
 </template>
 
@@ -289,7 +323,6 @@ function openSettings() {
 .ai-translator {
   display: flex;
   flex-direction: column;
-  height: 100%;
 }
 
 .translator-toolbar {
@@ -304,28 +337,59 @@ function openSettings() {
 }
 
 .translator-panels {
-  flex: 1;
-  min-height: 0;
+  flex-shrink: 0;
 }
 
-.paragraph-card,
-.paragraph-card :deep(.n-card__content) {
-  height: 100%;
+.translator-paragraph-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.paragraph-list {
+.source-card {
+  flex-shrink: 0;
+}
+
+.source-input :deep(textarea) {
+  resize: vertical;
+}
+
+.aligned-paragraphs {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: 100%;
-  overflow: auto;
 }
 
-.paragraph-item {
-  padding: 12px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #fafafa;
+.aligned-header,
+.aligned-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.aligned-header {
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.aligned-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.aligned-row {
+  padding-bottom: 10px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.aligned-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.aligned-cell {
+  min-width: 0;
 }
 
 .paragraph-index {
