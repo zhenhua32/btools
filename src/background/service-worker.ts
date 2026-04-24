@@ -168,6 +168,7 @@ async function handlePageTranslateSubmit(
       title: message.payload.title,
       url: message.payload.url,
       translatedText: result.text,
+      paragraphs: result.paragraphs,
       targetLanguage: settings.defaultTargetLanguage || '中文',
       strategyUsed: result.strategyUsed,
     })

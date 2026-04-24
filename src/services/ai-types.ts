@@ -82,6 +82,7 @@ interface PageTranslateSuccessPayload {
   title: string
   url: string
   translatedText: string
+  paragraphs?: string[]
   targetLanguage: string
   strategyUsed: TranslationStrategy
 }

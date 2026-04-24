@@ -38,6 +38,7 @@ interface PageTranslateStatusMessage {
         title: string
         url: string
         translatedText: string
+        paragraphs?: string[]
         targetLanguage: string
         strategyUsed: 'whole-document' | 'paragraph-by-paragraph'
       }
@@ -53,6 +54,7 @@ interface OverlaySuccessState {
   title: string
   url: string
   translatedText: string
+  paragraphs?: string[]
   targetLanguage: string
   strategyUsed: 'whole-document' | 'paragraph-by-paragraph'
 }
@@ -60,6 +62,7 @@ interface OverlaySuccessState {
 interface PageTranslateRuntimeState {
   activeRequestId: string
   overlay: ReturnType<typeof createTranslationOverlay>
+  textNodesMap?: Text[]
 }
 
 const globalScope = globalThis as typeof globalThis & {
@@ -116,7 +119,7 @@ async function beginPageTranslation(
   runtimeState.overlay.setLoading('正在读取页面正文...')
 
   try {
-    const extracted = extractPageContent()
+    const extracted = extractPageContent(runtimeState)
     if (requestId !== runtimeState.activeRequestId) {
       return
     }
@@ -159,47 +162,95 @@ function handlePageTranslateStatus(
     return
   }
 
-  runtimeState.overlay.setSuccess({
-    title: message.payload.title,
-    url: message.payload.url,
-    translatedText: message.payload.translatedText,
-    targetLanguage: message.payload.targetLanguage,
-    strategyUsed: message.payload.strategyUsed,
-  })
+  if (message.payload.status === 'success') {
+    if (message.payload.paragraphs && runtimeState.textNodesMap) {
+      const { paragraphs } = message.payload
+      const { textNodesMap } = runtimeState
+      for (let i = 0; i < Math.min(paragraphs.length, textNodesMap.length); i++) {
+        textNodesMap[i].nodeValue = paragraphs[i]
+      }
+    }
+
+    runtimeState.overlay.setSuccess({
+      title: message.payload.title,
+      url: message.payload.url,
+      translatedText: message.payload.translatedText,
+      paragraphs: message.payload.paragraphs,
+      targetLanguage: message.payload.targetLanguage,
+      strategyUsed: message.payload.strategyUsed,
+    })
+  }
 }
 
-function extractPageContent(): ExtractedPageContent {
-  const bodyText = normalizePageText(document.body?.innerText || '')
-  const mainText = pickPreferredMainContent()
-  const text = mainText.length >= Math.max(300, Math.floor(bodyText.length * 0.35)) ? mainText : bodyText
+function extractPageContent(runtimeState: PageTranslateRuntimeState): ExtractedPageContent {
+  const rootElement = getPreferredMainElement()
+  const textNodesMap: Text[] = []
+  const textStrings: string[] = []
+
+  // 用递归更精准地控制节点遍历，避免将无意义的排版空格、短字符算作单独的翻译段落
+  function traverse(node: Node) {
+    // 过滤不需要翻译的区域
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const element = node as HTMLElement
+      const tag = element.tagName.toUpperCase()
+      if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'CODE', 'SVG', 'VIDEO', 'AUDIO'].includes(tag)) {
+        return
+      }
+      if (element.closest('[data-btools-page-translation]') || element.closest('nav') || element.closest('footer')) {
+        return
+      }
+    }
+
+    // 如果是文本节点，做严格的有效性判断
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.nodeValue?.trim()
+      if (!text) return
+
+      // 要求文本长度至少超过 8 个字符，或者包含至少一个中文字符。
+      // 否则很多页面上只有 1-2 个字符的标点、数字、按钮文字会被拆分成几千个段落。
+      const isMeaningful = text.length > 8 || /[\u4e00-\u9fa5]/.test(text)
+      
+      // 有时候也会有孤立的短单词（如列表项），用正则更宽松地匹配具有实际单词的句子
+      // 至少包含两个以上的英文单词，或包含中文，才被视为有翻译价值的句子/段落
+      const hasWords = text.split(/\s+/).length > 1 || /[\u4e00-\u9fa5]/.test(text)
+
+      if (isMeaningful || hasWords) {
+        textNodesMap.push(node as Text)
+        textStrings.push(text)
+      }
+      return
+    }
+
+    // 继续遍历子节点
+    for (const child of Array.from(node.childNodes)) {
+      traverse(child)
+    }
+  }
+
+  traverse(rootElement)
+  
+  runtimeState.textNodesMap = textNodesMap
 
   return {
-    text,
+    text: textStrings.join('\n\n'),
     title: document.title.trim() || '未命名页面',
     url: window.location.href,
   }
 }
 
-function pickPreferredMainContent(): string {
+function getPreferredMainElement(): HTMLElement {
   const candidates = Array.from(
     document.querySelectorAll<HTMLElement>('main, article, [role="main"], .article, .post, .content'),
   )
-    .map((element) => normalizePageText(element.innerText || ''))
-    .filter((text) => text.length > 0)
-    .sort((left, right) => right.length - left.length)
+    .sort((left, right) => (right.innerText || '').length - (left.innerText || '').length)
 
-  return candidates[0] || ''
-}
+  // 如果找到合适的内容区，将其作为根，否则使用 body
+  const main = candidates[0]
+  if (main && (main.innerText || '').length > 300) {
+    return main
+  }
 
-function normalizePageText(text: string): string {
-  return text
-    .replace(/\u00a0/g, ' ')
-    .replace(/\r\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .split('\n')
-    .map((line) => line.trimEnd())
-    .join('\n')
-    .trim()
+  return document.body
 }
 
 function submitPageContent(message: PageTranslateSubmitMessage): void {
