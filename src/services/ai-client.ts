@@ -1,4 +1,5 @@
 import { getAiSettings, getMissingAiSettingLabels } from './ai-settings'
+import { requestChatCompletion, resolveChatEndpoint } from './ai-api'
 import {
   AI_PROXY_MESSAGE_TYPE,
   type AiChatMessage,
@@ -27,20 +28,33 @@ export async function requestAiChatCompletion(
     throw new Error('当前环境不支持扩展后台代理，请在加载扩展后使用 AI 翻译')
   }
 
-  const message: AiProxyRequestMessage = {
-    type: AI_PROXY_MESSAGE_TYPE,
-    payload: {
-      baseUrl: settings.baseUrl,
-      apiKey: settings.apiKey,
-      model: settings.model,
-      messages,
-      temperature: options.temperature,
-      maxTokens: options.maxTokens,
-      timeoutMs: options.timeoutMs,
-    },
+  const payload = {
+    baseUrl: settings.baseUrl,
+    apiKey: settings.apiKey,
+    model: settings.model,
+    messages,
+    temperature: options.temperature,
+    maxTokens: options.maxTokens,
+    timeoutMs: options.timeoutMs,
   }
 
-  const response = (await chrome.runtime.sendMessage(message)) as AiProxyReply | undefined
+  if (isServiceWorkerContext()) {
+    const endpoint = resolveChatEndpoint(payload.baseUrl)
+    return await requestChatCompletion(endpoint, payload)
+  }
+
+  const message: AiProxyRequestMessage = {
+    type: AI_PROXY_MESSAGE_TYPE,
+    payload,
+  }
+
+  let response: AiProxyReply | undefined
+
+  try {
+    response = (await chrome.runtime.sendMessage(message)) as AiProxyReply | undefined
+  } catch (err: unknown) {
+    throw new Error('后台服务已断开，请刷新页面或重载扩展。')
+  }
 
   if (!response) {
     throw new Error('后台代理没有返回结果')
@@ -55,4 +69,8 @@ export async function requestAiChatCompletion(
 
 function hasRuntimeMessaging(): boolean {
   return typeof chrome !== 'undefined' && !!chrome.runtime?.id && !!chrome.runtime.sendMessage
+}
+
+function isServiceWorkerContext(): boolean {
+  return typeof window === 'undefined' && typeof self !== 'undefined' && 'ServiceWorkerGlobalScope' in self
 }

@@ -47,8 +47,58 @@ export interface AiProxyErrorResponse {
 
 export type AiProxyReply = AiProxySuccessResponse | AiProxyErrorResponse
 
+export interface PageTranslateStartMessage {
+  type: typeof PAGE_TRANSLATE_START_MESSAGE_TYPE
+  payload: {
+    requestId: string
+  }
+}
+
+export interface PageTranslateSubmitMessage {
+  type: typeof PAGE_TRANSLATE_SUBMIT_MESSAGE_TYPE
+  payload: {
+    requestId: string
+    text: string
+    title: string
+    url: string
+  }
+}
+
+interface PageTranslateLoadingPayload {
+  requestId: string
+  status: 'loading'
+  message: string
+}
+
+interface PageTranslateErrorPayload {
+  requestId: string
+  status: 'error'
+  message: string
+}
+
+interface PageTranslateSuccessPayload {
+  requestId: string
+  status: 'success'
+  title: string
+  url: string
+  translatedText: string
+  targetLanguage: string
+  strategyUsed: TranslationStrategy
+}
+
+export interface PageTranslateStatusMessage {
+  type: typeof PAGE_TRANSLATE_STATUS_MESSAGE_TYPE
+  payload:
+    | PageTranslateLoadingPayload
+    | PageTranslateErrorPayload
+    | PageTranslateSuccessPayload
+}
+
 export const AI_SETTINGS_STORAGE_KEY = 'ai-translate-settings'
 export const AI_PROXY_MESSAGE_TYPE = 'btools:ai-chat'
+export const PAGE_TRANSLATE_START_MESSAGE_TYPE = 'btools:page-translate-start'
+export const PAGE_TRANSLATE_SUBMIT_MESSAGE_TYPE = 'btools:page-translate-submit'
+export const PAGE_TRANSLATE_STATUS_MESSAGE_TYPE = 'btools:page-translate-status'
 
 export const DEFAULT_AI_SETTINGS: AiSettings = {
   baseUrl: 'https://api.openai.com/v1',
@@ -103,4 +153,24 @@ export function normalizeAiSettings(input?: Partial<AiSettings> | null): AiSetti
     defaultDisplayMode,
     defaultTranslationStrategy,
   }
+}
+
+export function isAiProxyRequestMessage(message: unknown): message is AiProxyRequestMessage {
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    'type' in message &&
+    (message as { type?: unknown }).type === AI_PROXY_MESSAGE_TYPE &&
+    'payload' in message
+  )
+}
+
+export function isPageTranslateSubmitMessage(message: unknown): message is PageTranslateSubmitMessage {
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    'type' in message &&
+    (message as { type?: unknown }).type === PAGE_TRANSLATE_SUBMIT_MESSAGE_TYPE &&
+    'payload' in message
+  )
 }

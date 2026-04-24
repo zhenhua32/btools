@@ -23,11 +23,15 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         'service-worker': resolve(__dirname, 'src/background/service-worker.ts'),
+        'content-script': resolve(__dirname, 'src/content-script.ts'),
       },
       output: {
         entryFileNames: (chunkInfo) => {
           if (chunkInfo.name === 'service-worker') {
             return 'service-worker.js'
+          }
+          if (chunkInfo.name === 'content-script') {
+            return 'content-script.js'
           }
           return 'assets/[name]-[hash].js'
         },

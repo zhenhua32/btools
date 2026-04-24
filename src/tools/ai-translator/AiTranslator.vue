@@ -12,17 +12,16 @@ import {
   NTag,
   NText,
 } from 'naive-ui'
-import { requestAiChatCompletion } from '@/services/ai-client'
 import {
   getAiSettings,
   getMissingAiSettingLabels,
   isAiSettingsConfigured,
 } from '@/services/ai-settings'
+import { splitParagraphs, translateTextWithAi } from '@/services/ai-translator'
 import {
   DISPLAY_MODE_OPTIONS,
   TRANSLATION_STRATEGY_OPTIONS,
   DEFAULT_AI_SETTINGS,
-  type AiChatMessage,
   type AiDisplayMode,
   type AiSettings,
   type TranslationStrategy,
@@ -112,169 +111,22 @@ async function translateText() {
   loading.value = true
 
   try {
-    if (translationStrategy.value === 'paragraph-by-paragraph') {
-      await translateByParagraphs(sourceText.value)
-    } else {
-      await translateWholeDocument(sourceText.value)
-    }
+    const result = await translateTextWithAi(sourceText.value, {
+      settings: cachedSettings.value,
+      strategy: translationStrategy.value,
+      onProgress: (message) => {
+        infoMsg.value = message
+      },
+    })
+
+    translatedText.value = result.text
+    translatedParagraphs.value = result.paragraphs
   } catch (error) {
     errorMsg.value = error instanceof Error ? error.message : '翻译失败'
   } finally {
     loading.value = false
     infoMsg.value = ''
   }
-}
-
-async function translateWholeDocument(text: string) {
-  infoMsg.value = '正在整块翻译，请稍候...'
-  const cleaned = await requestTranslatedContent(text, false)
-
-  translatedText.value = cleaned
-  translatedParagraphs.value = splitParagraphs(translatedText.value)
-}
-
-async function translateByParagraphs(text: string) {
-  const paragraphs = splitParagraphs(text)
-  if (paragraphs.length === 0) {
-    throw new Error('未识别到可翻译的段落')
-  }
-
-  const results: string[] = []
-
-  for (let i = 0; i < paragraphs.length; i++) {
-    infoMsg.value = `正在翻译第 ${i + 1} / ${paragraphs.length} 段...`
-    results.push(await requestTranslatedContent(paragraphs[i], true))
-  }
-
-  translatedParagraphs.value = results
-  translatedText.value = results.join('\n\n')
-}
-
-async function requestTranslatedContent(text: string, singleParagraph: boolean): Promise<string> {
-  const firstPass = await requestAiChatCompletion(buildMessages(text, singleParagraph), {
-    temperature: 0.2,
-    timeoutMs: singleParagraph ? 60000 : 90000,
-  })
-  const cleanedFirstPass = sanitizeTranslationOutput(text, firstPass.content)
-
-  if (!looksLikeSourceEcho(text, cleanedFirstPass, singleParagraph)) {
-    return cleanedFirstPass
-  }
-
-  const secondPass = await requestAiChatCompletion(buildMessages(text, singleParagraph, true), {
-    temperature: 0,
-    timeoutMs: singleParagraph ? 60000 : 90000,
-  })
-  const cleanedSecondPass = sanitizeTranslationOutput(text, secondPass.content)
-
-  if (!cleanedSecondPass.trim()) {
-    throw new Error('模型返回了空结果，请重试或调整提示词')
-  }
-
-  return cleanedSecondPass
-}
-
-function buildMessages(text: string, singleParagraph: boolean, retryWithoutEcho = false): AiChatMessage[] {
-  const targetLanguage = cachedSettings.value.defaultTargetLanguage || '中文'
-  const systemParts = [
-    cachedSettings.value.systemPrompt,
-    `将用户提供的文本翻译成${targetLanguage}。`,
-    '保留原文的段落、换行、列表、Markdown 或代码块结构。',
-    '只输出译文，不要解释，不要添加标题、备注或额外说明。',
-    '绝对不要重复、复制、附带或夹带原文。输出中禁止出现未翻译的原文段落，除非是必须保留的代码、标识符或专有格式片段。',
-  ].filter(Boolean)
-
-  const retryNotice = retryWithoutEcho
-    ? '你上一条回答错误地包含了原文。这次只返回译文正文，不要重复原文，不要做双语对照。\n\n'
-    : ''
-  const userPrompt = singleParagraph
-    ? `${retryNotice}请翻译下面这一段内容，保持原意与格式，只返回译文：\n\n${text}`
-    : `${retryNotice}请翻译下面的完整内容，并尽量保持原有段落结构，只返回译文：\n\n${text}`
-
-  return [
-    { role: 'system', content: systemParts.join('\n') },
-    { role: 'user', content: userPrompt },
-  ]
-}
-
-function sanitizeTranslationOutput(source: string, output: string): string {
-  let candidate = output.trim()
-  const trimmedSource = source.trim()
-
-  if (!candidate) {
-    return ''
-  }
-
-  if (candidate.startsWith(trimmedSource)) {
-    candidate = candidate.slice(trimmedSource.length).trimStart()
-    candidate = candidate.replace(/^[:：\-\n\s]+/, '').trim()
-  }
-
-  const sourceParas = splitParagraphs(source)
-  const outputParas = splitParagraphs(candidate)
-  let leadingEchoCount = 0
-
-  while (
-    leadingEchoCount < sourceParas.length &&
-    leadingEchoCount < outputParas.length &&
-    normalizeComparableText(sourceParas[leadingEchoCount]) ===
-      normalizeComparableText(outputParas[leadingEchoCount])
-  ) {
-    leadingEchoCount += 1
-  }
-
-  if (leadingEchoCount > 0) {
-    const stripped = outputParas.slice(leadingEchoCount).join('\n\n').trim()
-    if (stripped) {
-      candidate = stripped
-    }
-  }
-
-  return candidate.trim()
-}
-
-function looksLikeSourceEcho(source: string, output: string, singleParagraph: boolean): boolean {
-  const normalizedSource = normalizeComparableText(source)
-  const normalizedOutput = normalizeComparableText(output)
-
-  if (!normalizedOutput) {
-    return true
-  }
-
-  if (normalizedOutput === normalizedSource) {
-    return true
-  }
-
-  if (!singleParagraph && normalizedOutput.startsWith(normalizedSource)) {
-    return true
-  }
-
-  const sourceParas = splitParagraphs(source)
-  const outputParas = splitParagraphs(output)
-  let sharedLeadingParas = 0
-
-  while (
-    sharedLeadingParas < sourceParas.length &&
-    sharedLeadingParas < outputParas.length &&
-    normalizeComparableText(sourceParas[sharedLeadingParas]) ===
-      normalizeComparableText(outputParas[sharedLeadingParas])
-  ) {
-    sharedLeadingParas += 1
-  }
-
-  return singleParagraph ? sharedLeadingParas > 0 : sharedLeadingParas >= 1
-}
-
-function normalizeComparableText(text: string): string {
-  return text.replace(/\s+/g, ' ').trim().toLowerCase()
-}
-
-function splitParagraphs(text: string): string[] {
-  return text
-    .replace(/\r\n/g, '\n')
-    .split(/\n\s*\n+/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean)
 }
 
 async function copyResult() {
