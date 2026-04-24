@@ -52,8 +52,7 @@ export function buildTranslationMessages(
   const systemParts = [
     settings.systemPrompt,
     `将用户提供的文本翻译成${targetLanguage}。`,
-    '保留原文的段落、换行、列表、Markdown 或代码块结构。',
-    '只输出译文，不要解释，不要添加标题、备注或额外说明。',
+    '保留原文的段落、换行、列表、Markdown 或代码块结构。',    '输入文本可能包含内联 HTML 标签（如 <a>、<span>、<b> 等），请务必在译文中严格保留所有这些标签及其属性、并保持其原有相对位置结构，只翻译标签开头以及标签之间的可见纯文本内容。',    '只输出译文，不要解释，不要添加标题、备注或额外说明。',
     '绝对不要重复、复制、附带或夹带原文。输出中禁止出现未翻译的原文段落，除非是必须保留的代码、标识符或专有格式片段。',
   ].filter(Boolean)
 

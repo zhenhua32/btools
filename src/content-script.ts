@@ -62,7 +62,7 @@ interface OverlaySuccessState {
 interface PageTranslateRuntimeState {
   activeRequestId: string
   overlay: ReturnType<typeof createTranslationOverlay>
-  textNodesMap?: Text[]
+  nodeElementsMap?: HTMLElement[]
 }
 
 const globalScope = globalThis as typeof globalThis & {
@@ -163,11 +163,11 @@ function handlePageTranslateStatus(
   }
 
   if (message.payload.status === 'success') {
-    if (message.payload.paragraphs && runtimeState.textNodesMap) {
+    if (message.payload.paragraphs && runtimeState.nodeElementsMap) {
       const { paragraphs } = message.payload
-      const { textNodesMap } = runtimeState
-      for (let i = 0; i < Math.min(paragraphs.length, textNodesMap.length); i++) {
-        textNodesMap[i].nodeValue = paragraphs[i]
+      const { nodeElementsMap } = runtimeState
+      for (let i = 0; i < Math.min(paragraphs.length, nodeElementsMap.length); i++) {
+        nodeElementsMap[i].innerHTML = paragraphs[i]
       }
     }
 
@@ -184,52 +184,93 @@ function handlePageTranslateStatus(
 
 function extractPageContent(runtimeState: PageTranslateRuntimeState): ExtractedPageContent {
   const rootElement = getPreferredMainElement()
-  const textNodesMap: Text[] = []
+  const nodeElementsMap: HTMLElement[] = []
   const textStrings: string[] = []
 
-  // 用递归更精准地控制节点遍历，避免将无意义的排版空格、短字符算作单独的翻译段落
+  const blockTagsToExclude = ['SCRIPT', 'STYLE', 'NOSCRIPT', 'SVG', 'VIDEO', 'AUDIO', 'IFRAME', 'CANVAS']
+  const inlineTags = ['A', 'SPAN', 'STRONG', 'B', 'EM', 'I', 'CODE', 'MARK', 'S', 'U', 'SUB', 'SUP', 'Q', 'ABBR', 'CITE', 'KBD', 'WBR', 'BR']
+
+  function isInlineNode(node: Node): boolean {
+    if (node.nodeType === Node.TEXT_NODE) return true
+    if (node.nodeType === Node.COMMENT_NODE) return true
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const tag = (node as HTMLElement).tagName.toUpperCase()
+      return inlineTags.includes(tag)
+    }
+    return false
+  }
+
+  function hasBlockChildren(element: HTMLElement): boolean {
+    return Array.from(element.childNodes).some((child) => !isInlineNode(child))
+  }
+
+  // 用递归更精准地控制节点遍历，遇到只包含文本和内联标签的块级容器，整块提取
   function traverse(node: Node) {
-    // 过滤不需要翻译的区域
     if (node.nodeType === Node.ELEMENT_NODE) {
       const element = node as HTMLElement
       const tag = element.tagName.toUpperCase()
-      if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'CODE', 'SVG', 'VIDEO', 'AUDIO'].includes(tag)) {
+
+      if (blockTagsToExclude.includes(tag)) {
         return
       }
       if (element.closest('[data-btools-page-translation]') || element.closest('nav') || element.closest('footer')) {
         return
       }
+
+      // 如果没有阻止级子节点，且自身包含有效文本，则作为翻译单元
+      if (!hasBlockChildren(element)) {
+        const text = element.innerText?.trim() || element.textContent?.trim()
+        if (!text) return
+
+        const isMeaningful = text.length > 8 || /[\u4e00-\u9fa5]/.test(text)
+        const hasWords = text.split(/\s+/).length > 1 || /[\u4e00-\u9fa5]/.test(text)
+
+        if (isMeaningful || hasWords) {
+          nodeElementsMap.push(element)
+          // 清除多余空行，以免被后端错误分割
+          const htmlContent = element.innerHTML.trim().replace(/\n\s*\n+/g, '\n')
+          textStrings.push(htmlContent)
+        }
+        return // 已经是翻译单元，不再深入
+      }
+
+      // 如果包含块级子节点，但自己也有裸露的有效文本节点，为了不漏掉它们，可以把裸露文本包进 span
+      // 这里为简单起见，允许递归下去。对于游离的 TEXT_NODE，我们在下面处理。
     }
 
-    // 如果是文本节点，做严格的有效性判断
     if (node.nodeType === Node.TEXT_NODE) {
       const text = node.nodeValue?.trim()
-      if (!text) return
-
-      // 要求文本长度至少超过 8 个字符，或者包含至少一个中文字符。
-      // 否则很多页面上只有 1-2 个字符的标点、数字、按钮文字会被拆分成几千个段落。
-      const isMeaningful = text.length > 8 || /[\u4e00-\u9fa5]/.test(text)
-      
-      // 有时候也会有孤立的短单词（如列表项），用正则更宽松地匹配具有实际单词的句子
-      // 至少包含两个以上的英文单词，或包含中文，才被视为有翻译价值的句子/段落
-      const hasWords = text.split(/\s+/).length > 1 || /[\u4e00-\u9fa5]/.test(text)
-
-      if (isMeaningful || hasWords) {
-        textNodesMap.push(node as Text)
-        textStrings.push(text)
+      if (text) {
+        const parent = node.parentElement
+        // 只有当父节点有块级子节点时（被上面的逻辑漏掉），才特殊处理孤立文字
+        if (parent && hasBlockChildren(parent)) {
+          const isMeaningful = text.length > 8 || /[\u4e00-\u9fa5]/.test(text)
+          const hasWords = text.split(/\s+/).length > 1 || /[\u4e00-\u9fa5]/.test(text)
+          if (isMeaningful || hasWords) {
+            // 包裹游离文字，使其成为一个独立 element
+            const wrapper = document.createElement('span')
+            wrapper.textContent = node.nodeValue
+            parent.replaceChild(wrapper, node)
+            nodeElementsMap.push(wrapper)
+            const htmlContent = wrapper.innerHTML.trim().replace(/\n\s*\n+/g, '\n')
+            textStrings.push(htmlContent)
+          }
+        }
       }
       return
     }
 
     // 继续遍历子节点
-    for (const child of Array.from(node.childNodes)) {
+    // 拷贝一份 children 数组，防止在遍历中如果发生了 replaceChild 导致异常
+    const childrenToTraverse = Array.from(node.childNodes)
+    for (const child of childrenToTraverse) {
       traverse(child)
     }
   }
 
   traverse(rootElement)
   
-  runtimeState.textNodesMap = textNodesMap
+  runtimeState.nodeElementsMap = nodeElementsMap
 
   return {
     text: textStrings.join('\n\n'),
