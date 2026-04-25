@@ -136,12 +136,6 @@ async function handlePageTranslateSubmit(
       throw new Error(`请先在 BTools 设置页补全：${missingFields.join('、')}`)
     }
 
-    sendPageTranslateStatus(tabId, {
-      requestId: message.payload.requestId,
-      status: 'loading',
-      message: '正在连接模型...',
-    })
-
     const result = await translateTextWithAi(message.payload.text, {
       settings,
       strategy: 'paragraph-by-paragraph',

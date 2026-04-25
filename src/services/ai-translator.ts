@@ -182,6 +182,9 @@ async function translateParagraphs(
 
   const results: string[] = new Array(paragraphs.length)
   let completedCount = 0
+  
+  options.onProgress?.(`已完成翻译 ${completedCount}/${paragraphs.length}`)
+
   let currentIndex = 0
   const concurrencyLimit = options.concurrencyLimit ?? options.settings.concurrencyLimit ?? 3
 
@@ -197,7 +200,7 @@ async function translateParagraphs(
         results[index] = paragraphs[index]
       } finally {
         completedCount++
-        options.onProgress?.(`已完成翻译 ${completedCount} / ${paragraphs.length} 段...`)
+        options.onProgress?.(`已完成翻译 ${completedCount}/${paragraphs.length}`)
       }
     }
   })
