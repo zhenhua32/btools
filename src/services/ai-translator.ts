@@ -5,6 +5,7 @@ export interface TranslateTextOptions {
   settings: AiSettings
   strategy?: TranslationStrategy
   fallbackToParagraphsOnFailure?: boolean
+  preserveParagraphOnFailure?: boolean
   onProgress?: (message: string) => void
 }
 
@@ -12,6 +13,12 @@ export interface TranslateTextResult {
   text: string
   paragraphs: string[]
   strategyUsed: TranslationStrategy
+}
+
+interface TranslationAttemptDiagnostics {
+  label: string
+  rawContent: string
+  cleanedContent: string
 }
 
 export async function translateTextWithAi(
@@ -176,7 +183,17 @@ async function translateParagraphs(
 
   for (let index = 0; index < paragraphs.length; index += 1) {
     options.onProgress?.(`正在翻译第 ${index + 1} / ${paragraphs.length} 段...`)
-    results.push(await requestTranslatedContent(paragraphs[index], options.settings, true))
+
+    try {
+      results.push(await requestTranslatedContent(paragraphs[index], options.settings, true))
+    } catch (error) {
+      if (!options.preserveParagraphOnFailure || !canPreserveSourceParagraph(error)) {
+        throw error
+      }
+
+      results.push(paragraphs[index])
+      options.onProgress?.(`第 ${index + 1} / ${paragraphs.length} 段未返回可用译文，已保留原文继续处理...`)
+    }
   }
 
   return {
@@ -214,10 +231,82 @@ async function requestTranslatedContent(
   const cleanedSecondPass = sanitizeTranslationOutput(text, secondPass.content)
 
   if (!cleanedSecondPass.trim()) {
-    throw new Error('模型返回了空结果，请重试或调整提示词')
+    throw new Error(
+      buildEmptyTranslationError(text, settings.model, singleParagraph, [
+        {
+          label: '第一',
+          rawContent: firstPass.content,
+          cleanedContent: cleanedFirstPass,
+        },
+        {
+          label: '第二',
+          rawContent: secondPass.content,
+          cleanedContent: cleanedSecondPass,
+        },
+      ]),
+    )
   }
 
   return cleanedSecondPass
+}
+
+function buildEmptyTranslationError(
+  source: string,
+  model: string,
+  singleParagraph: boolean,
+  attempts: TranslationAttemptDiagnostics[],
+): string {
+  const modelLabel = model.trim() || '未命名模型'
+  const attemptSummary = attempts
+    .map((attempt) => `${attempt.label}次尝试：${describeTranslationAttempt(source, singleParagraph, attempt)}`)
+    .join('；')
+
+  return `${modelLabel} 返回了空结果。${attemptSummary}`
+}
+
+function canPreserveSourceParagraph(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false
+  }
+
+  return error.message.includes('返回了空结果') || error.message.includes('模型接口未返回可用内容')
+}
+
+function describeTranslationAttempt(
+  source: string,
+  singleParagraph: boolean,
+  attempt: TranslationAttemptDiagnostics,
+): string {
+  const rawContent = attempt.rawContent.trim()
+  const cleanedContent = attempt.cleanedContent.trim()
+
+  if (!rawContent) {
+    return '模型直接返回空白内容'
+  }
+
+  if (!cleanedContent) {
+    return `清洗后为空，原始返回片段：${formatTranslationPreview(rawContent)}`
+  }
+
+  if (looksLikeSourceEcho(source, cleanedContent, singleParagraph)) {
+    return `返回内容仍与原文重复，原始返回片段：${formatTranslationPreview(rawContent)}`
+  }
+
+  return `返回内容不可用，原始返回片段：${formatTranslationPreview(rawContent)}`
+}
+
+function formatTranslationPreview(text: string): string {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+
+  if (!normalized) {
+    return '空白'
+  }
+
+  if (normalized.length <= 120) {
+    return normalized
+  }
+
+  return `${normalized.slice(0, 120)}...`
 }
 
 function normalizeComparableText(text: string): string {

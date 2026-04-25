@@ -48,10 +48,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   activePageTranslationRequests.set(tab.id, requestId)
 
   try {
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ['content-script.js'],
-    })
+    await ensurePageTranslateContentScript(tab.id)
 
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
@@ -148,6 +145,7 @@ async function handlePageTranslateSubmit(
     const result = await translateTextWithAi(message.payload.text, {
       settings,
       strategy: 'paragraph-by-paragraph',
+      preserveParagraphOnFailure: true,
       onProgress: (progressMessage) => {
         sendPageTranslateStatus(tabId, {
           requestId: message.payload.requestId,
@@ -208,6 +206,28 @@ function ensurePageTranslateContextMenu(): void {
 
 function createPageTranslationRequestId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+async function ensurePageTranslateContentScript(tabId: number): Promise<void> {
+  const [existingScriptState] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const scope = globalThis as typeof globalThis & {
+        __btoolsPageTranslateInitialized?: boolean
+      }
+
+      return !!scope.__btoolsPageTranslateInitialized
+    },
+  })
+
+  if (existingScriptState?.result) {
+    return
+  }
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['content-script.js'],
+  })
 }
 
 function sendPageTranslateStatus(
