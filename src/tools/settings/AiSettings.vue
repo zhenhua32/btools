@@ -7,6 +7,7 @@ import {
   NForm,
   NFormItem,
   NInput,
+  NInputNumber,
   NSelect,
   NSpace,
   NText,
@@ -189,10 +190,19 @@ function validateForm(): string {
           />
         </NFormItem>
 
-        <NFormItem label="默认翻译策略">
+        <NFormItem label="默认翻译策略 (网页翻译使用逐段翻译)">
           <NSelect
             v-model:value="formState.defaultTranslationStrategy"
             :options="TRANSLATION_STRATEGY_OPTIONS"
+          />
+        </NFormItem>
+
+        <NFormItem label="并发数 (逐段翻译时控制并发)">
+          <NInputNumber
+            v-model:value="formState.concurrencyLimit"
+            :min="1"
+            :max="10"
+            placeholder="默认: 3"
           />
         </NFormItem>
       </NForm>

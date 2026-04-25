@@ -183,7 +183,7 @@ async function translateParagraphs(
   const results: string[] = new Array(paragraphs.length)
   let completedCount = 0
   let currentIndex = 0
-  const concurrencyLimit = options.concurrencyLimit ?? 3
+  const concurrencyLimit = options.concurrencyLimit ?? options.settings.concurrencyLimit ?? 3
 
   const workers = Array(concurrencyLimit).fill(null).map(async () => {
     while (currentIndex < paragraphs.length) {

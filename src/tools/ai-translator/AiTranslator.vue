@@ -39,6 +39,7 @@ const translationStrategy = ref<TranslationStrategy>(
 const cachedSettings = ref<AiSettings>({ ...DEFAULT_AI_SETTINGS })
 const errorMsg = ref('')
 const infoMsg = ref('')
+const timeElapsedMsg = ref('')
 const loading = ref(false)
 const hasInitializedDefaults = ref(false)
 
@@ -100,6 +101,7 @@ async function translateText() {
 
   errorMsg.value = ''
   infoMsg.value = ''
+  timeElapsedMsg.value = ''
 
   await loadSettingsSnapshot(false)
 
@@ -109,6 +111,13 @@ async function translateText() {
   }
 
   loading.value = true
+  const startTime = performance.now()
+  let timerInterval: number | null = null
+
+  timerInterval = window.setInterval(() => {
+    const elapsedSeconds = ((performance.now() - startTime) / 1000).toFixed(1)
+    timeElapsedMsg.value = `耗时: ${elapsedSeconds}s`
+  }, 100)
 
   try {
     const result = await translateTextWithAi(sourceText.value, {
@@ -121,11 +130,15 @@ async function translateText() {
 
     translatedText.value = result.text
     translatedParagraphs.value = result.paragraphs
+    infoMsg.value = '翻译完成'
   } catch (error) {
     errorMsg.value = error instanceof Error ? error.message : '翻译失败'
-  } finally {
-    loading.value = false
     infoMsg.value = ''
+  } finally {
+    if (timerInterval) clearInterval(timerInterval)
+    loading.value = false
+    const finalElapsed = ((performance.now() - startTime) / 1000).toFixed(1)
+    timeElapsedMsg.value = `总耗时: ${finalElapsed}s`
   }
 }
 
@@ -195,8 +208,8 @@ function openSettings() {
       {{ errorMsg }}
     </NAlert>
 
-    <NAlert v-if="infoMsg" type="info" style="margin-bottom: 8px">
-      {{ infoMsg }}
+    <NAlert v-if="infoMsg || timeElapsedMsg" type="info" style="margin-bottom: 8px">
+      {{ infoMsg }} <span v-if="timeElapsedMsg" style="margin-left: 8px">{{ timeElapsedMsg }}</span>
     </NAlert>
 
     <div class="translator-content">

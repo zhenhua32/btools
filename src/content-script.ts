@@ -845,9 +845,14 @@ function createTranslationOverlay(options: { onClose: () => void }) {
   shadowRoot.append(style, panel)
 
   let translatedText = ''
+  let startTime = 0
+  let timerInterval: number | null = null
 
   closeButton.addEventListener('click', () => {
     panel.classList.remove('visible')
+    if (timerInterval) clearInterval(timerInterval)
+    timerInterval = null
+    startTime = 0
     options.onClose()
   })
 
@@ -881,8 +886,15 @@ function createTranslationOverlay(options: { onClose: () => void }) {
       spinner.classList.remove('hidden')
       body.className = 'body loading'
       body.textContent = message
-      footerMeta.textContent = '正在处理整页内容'
       copyButton.disabled = true
+
+      if (!startTime) {
+        startTime = performance.now()
+        timerInterval = window.setInterval(() => {
+          const elapsed = ((performance.now() - startTime) / 1000).toFixed(1)
+          footerMeta.textContent = `耗时: ${elapsed}s`
+        }, 100)
+      }
     },
     setError(message: string) {
       translatedText = ''
@@ -893,16 +905,25 @@ function createTranslationOverlay(options: { onClose: () => void }) {
       body.textContent = message
       footerMeta.textContent = '可调整模型设置后重试'
       copyButton.disabled = true
+
+      if (timerInterval) clearInterval(timerInterval)
+      timerInterval = null
+      startTime = 0
     },
     setSuccess(state: OverlaySuccessState) {
+      let elapsedStr = ''
+      if (startTime) {
+        elapsedStr = ` (总耗时: ${((performance.now() - startTime) / 1000).toFixed(1)}s)`
+      }
+
       translatedText = state.translatedText
       badge.textContent = `译入 ${state.targetLanguage}`
       title.textContent = state.title
       url.textContent = state.url
       statusText.textContent =
         state.strategyUsed === 'paragraph-by-paragraph'
-          ? '已完成，当前结果来自逐段回退翻译'
-          : '已完成，整页翻译成功'
+          ? `已完成，当前结果来自逐段回退翻译${elapsedStr}`
+          : `已完成，整页翻译成功${elapsedStr}`
       spinner.classList.add('hidden')
       body.className = 'body'
       body.textContent = state.translatedText
@@ -911,6 +932,10 @@ function createTranslationOverlay(options: { onClose: () => void }) {
           ? '回退策略：逐段翻译'
           : '策略：整页翻译'
       copyButton.disabled = false
+
+      if (timerInterval) clearInterval(timerInterval)
+      timerInterval = null
+      startTime = 0
     },
   }
 }
