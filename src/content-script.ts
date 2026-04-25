@@ -50,6 +50,11 @@ interface ExtractedPageContent {
   url: string
 }
 
+interface ExtractedTextBlock {
+  element: HTMLElement
+  html: string
+}
+
 interface OverlaySuccessState {
   title: string
   url: string
@@ -64,6 +69,49 @@ interface PageTranslateRuntimeState {
   overlay: ReturnType<typeof createTranslationOverlay>
   nodeElementsMap?: HTMLElement[]
 }
+
+const EXCLUDED_PAGE_TRANSLATE_TAGS = new Set([
+  'SCRIPT',
+  'STYLE',
+  'NOSCRIPT',
+  'SVG',
+  'VIDEO',
+  'AUDIO',
+  'IFRAME',
+  'CANVAS',
+  'BUTTON',
+  'INPUT',
+  'TEXTAREA',
+  'SELECT',
+  'OPTION',
+  'LABEL',
+])
+
+const STRUCTURAL_TEXT_TAGS = new Set([
+  'P',
+  'LI',
+  'BLOCKQUOTE',
+  'PRE',
+  'H1',
+  'H2',
+  'H3',
+  'H4',
+  'H5',
+  'H6',
+  'FIGCAPTION',
+  'DD',
+  'DT',
+  'TD',
+  'TH',
+])
+
+const GENERIC_TEXT_CONTAINER_TAGS = new Set(['DIV', 'SECTION', 'ARTICLE', 'MAIN'])
+
+// 这些容器应作为整体翻译单元，避免内部每个 li / td / dd 分别成段
+const ATOMIC_CONTAINER_TAGS = new Set(['UL', 'OL', 'TABLE', 'DL'])
+
+const EXCLUDED_PAGE_TRANSLATE_HINT_PATTERN =
+  /(share|social|comment|related|recommend|breadcrumb|pagination|newsletter|subscribe|advert|ads|cookie|author|byline|meta|toolbar|reaction|promo|banner|outbrain|taboola)/i
 
 const globalScope = globalThis as typeof globalThis & {
   __btoolsPageTranslateInitialized?: boolean
@@ -189,99 +237,195 @@ function handlePageTranslateStatus(
 
 function extractPageContent(runtimeState: PageTranslateRuntimeState): ExtractedPageContent {
   const rootElement = getPreferredMainElement()
-  const nodeElementsMap: HTMLElement[] = []
-  const textStrings: string[] = []
+  const textBlocks = collectTranslatableBlocks(rootElement)
 
-  const blockTagsToExclude = ['SCRIPT', 'STYLE', 'NOSCRIPT', 'SVG', 'VIDEO', 'AUDIO', 'IFRAME', 'CANVAS']
-  const inlineTags = ['A', 'SPAN', 'STRONG', 'B', 'EM', 'I', 'CODE', 'MARK', 'S', 'U', 'SUB', 'SUP', 'Q', 'ABBR', 'CITE', 'KBD', 'WBR', 'BR']
-
-  function isInlineNode(node: Node): boolean {
-    if (node.nodeType === Node.TEXT_NODE) return true
-    if (node.nodeType === Node.COMMENT_NODE) return true
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      const tag = (node as HTMLElement).tagName.toUpperCase()
-      return inlineTags.includes(tag)
-    }
-    return false
-  }
-
-  function hasBlockChildren(element: HTMLElement): boolean {
-    return Array.from(element.childNodes).some((child) => !isInlineNode(child))
-  }
-
-  // 用递归更精准地控制节点遍历，遇到只包含文本和内联标签的块级容器，整块提取
-  function traverse(node: Node) {
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      const element = node as HTMLElement
-      const tag = element.tagName.toUpperCase()
-
-      if (blockTagsToExclude.includes(tag)) {
-        return
-      }
-      if (element.closest('[data-btools-page-translation]') || element.closest('nav') || element.closest('footer')) {
-        return
-      }
-
-      // 如果没有阻止级子节点，且自身包含有效文本，则作为翻译单元
-      if (!hasBlockChildren(element)) {
-        const text = element.innerText?.trim() || element.textContent?.trim()
-        if (!text) return
-
-        const isMeaningful = text.length > 8 || /[\u4e00-\u9fa5]/.test(text)
-        const hasWords = text.split(/\s+/).length > 1 || /[\u4e00-\u9fa5]/.test(text)
-
-        if (isMeaningful || hasWords) {
-          nodeElementsMap.push(element)
-          // 清除多余空行，以免被后端错误分割
-          const htmlContent = element.innerHTML.trim().replace(/\n\s*\n+/g, '\n')
-          textStrings.push(htmlContent)
-        }
-        return // 已经是翻译单元，不再深入
-      }
-
-      // 如果包含块级子节点，但自己也有裸露的有效文本节点，为了不漏掉它们，可以把裸露文本包进 span
-      // 这里为简单起见，允许递归下去。对于游离的 TEXT_NODE，我们在下面处理。
-    }
-
-    if (node.nodeType === Node.TEXT_NODE) {
-      const text = node.nodeValue?.trim()
-      if (text) {
-        const parent = node.parentElement
-        // 只有当父节点有块级子节点时（被上面的逻辑漏掉），才特殊处理孤立文字
-        if (parent && hasBlockChildren(parent)) {
-          const isMeaningful = text.length > 8 || /[\u4e00-\u9fa5]/.test(text)
-          const hasWords = text.split(/\s+/).length > 1 || /[\u4e00-\u9fa5]/.test(text)
-          if (isMeaningful || hasWords) {
-            // 包裹游离文字，使其成为一个独立 element
-            const wrapper = document.createElement('span')
-            wrapper.textContent = node.nodeValue
-            parent.replaceChild(wrapper, node)
-            nodeElementsMap.push(wrapper)
-            const htmlContent = wrapper.innerHTML.trim().replace(/\n\s*\n+/g, '\n')
-            textStrings.push(htmlContent)
-          }
-        }
-      }
-      return
-    }
-
-    // 继续遍历子节点
-    // 拷贝一份 children 数组，防止在遍历中如果发生了 replaceChild 导致异常
-    const childrenToTraverse = Array.from(node.childNodes)
-    for (const child of childrenToTraverse) {
-      traverse(child)
-    }
-  }
-
-  traverse(rootElement)
-  
-  runtimeState.nodeElementsMap = nodeElementsMap
+  runtimeState.nodeElementsMap = textBlocks.map((block) => block.element)
 
   return {
-    text: textStrings.join('\n\n'),
+    text: textBlocks.map((block) => block.html).join('\n\n'),
     title: document.title.trim() || '未命名页面',
     url: window.location.href,
   }
+}
+
+function collectTranslatableBlocks(rootElement: HTMLElement): ExtractedTextBlock[] {
+  const textBlocks: ExtractedTextBlock[] = []
+
+  const walk = (element: HTMLElement): boolean => {
+    if (shouldSkipPageTranslateElement(element, rootElement)) {
+      return false
+    }
+
+    // 列表、表格、定义列表整体作为一个翻译段落，不再下钻到 li / td / dd
+    if (ATOMIC_CONTAINER_TAGS.has(element.tagName.toUpperCase())) {
+      const html = getExtractedBlockHtml(element)
+      if (html) {
+        textBlocks.push({ element, html })
+        return true
+      }
+      return false
+    }
+
+    let childCaptured = false
+    for (const child of Array.from(element.children)) {
+      childCaptured = walk(child as HTMLElement) || childCaptured
+    }
+
+    if (childCaptured) {
+      return true
+    }
+
+    const html = getExtractedBlockHtml(element)
+    if (!html) {
+      return false
+    }
+
+    textBlocks.push({
+      element,
+      html,
+    })
+
+    return true
+  }
+
+  walk(rootElement)
+  return textBlocks
+}
+
+function shouldSkipPageTranslateElement(element: HTMLElement, rootElement: HTMLElement): boolean {
+  const tag = element.tagName.toUpperCase()
+
+  if (EXCLUDED_PAGE_TRANSLATE_TAGS.has(tag)) {
+    return true
+  }
+
+  if (element.hidden || element.getAttribute('aria-hidden') === 'true') {
+    return true
+  }
+
+  const style = window.getComputedStyle(element)
+  if (style.display === 'none' || style.visibility === 'hidden') {
+    return true
+  }
+
+  if (
+    element !== rootElement &&
+    (element.closest('[data-btools-page-translation]') ||
+      element.closest('nav, footer, aside, form, dialog, menu, [role="navigation"], [role="complementary"], [role="search"], [role="dialog"], [role="tablist"]') ||
+      hasExcludedSemanticContext(element, rootElement))
+  ) {
+    return true
+  }
+
+  return false
+}
+
+function hasExcludedSemanticContext(element: HTMLElement, rootElement: HTMLElement): boolean {
+  let current: HTMLElement | null = element
+
+  while (current && current !== rootElement) {
+    if (hasExcludedSemanticHint(current)) {
+      return true
+    }
+
+    current = current.parentElement
+  }
+
+  return false
+}
+
+function hasExcludedSemanticHint(element: HTMLElement): boolean {
+  const semanticText = [
+    element.id,
+    typeof element.className === 'string' ? element.className : '',
+    element.getAttribute('role') || '',
+    element.getAttribute('aria-label') || '',
+    element.getAttribute('data-testid') || '',
+  ]
+    .join(' ')
+    .trim()
+
+  return semanticText ? EXCLUDED_PAGE_TRANSLATE_HINT_PATTERN.test(semanticText) : false
+}
+
+function getExtractedBlockHtml(element: HTMLElement): string | null {
+  if (!shouldUseAsTextBlock(element)) {
+    return null
+  }
+
+  const html = normalizeExtractedHtml(element.innerHTML)
+  return html || null
+}
+
+function shouldUseAsTextBlock(element: HTMLElement): boolean {
+  const tag = element.tagName.toUpperCase()
+  if (!STRUCTURAL_TEXT_TAGS.has(tag) && !GENERIC_TEXT_CONTAINER_TAGS.has(tag) && !ATOMIC_CONTAINER_TAGS.has(tag)) {
+    return false
+  }
+
+  const rawText = element.innerText || element.textContent || ''
+  const normalizedText = normalizeTextContent(rawText)
+  if (!normalizedText) {
+    return false
+  }
+
+  const wordCount = normalizedText.split(/\s+/).filter(Boolean).length
+  const hasCjk = /[\u4e00-\u9fff]/.test(normalizedText)
+  const hasSentencePunctuation = /[。！？.!?;；:：]/.test(normalizedText)
+  const linkDensity = getLinkTextDensity(element, normalizedText)
+
+  if (linkDensity > 0.65) {
+    return false
+  }
+
+  // 原子容器：有足够文本内容即可采纳
+  if (ATOMIC_CONTAINER_TAGS.has(tag)) {
+    return normalizedText.length >= 8
+  }
+
+  if (STRUCTURAL_TEXT_TAGS.has(tag)) {
+    if (tag.startsWith('H')) {
+      return normalizedText.length >= 4
+    }
+
+    if (tag === 'LI') {
+      return normalizedText.length >= 6 || wordCount >= 3 || hasCjk
+    }
+
+    return normalizedText.length >= 12 || wordCount >= 4 || (hasCjk && normalizedText.length >= 6)
+  }
+
+  if (linkDensity > 0.45 && wordCount < 12 && normalizedText.length < 80) {
+    return false
+  }
+
+  return (
+    normalizedText.length >= 48 ||
+    wordCount >= 10 ||
+    (hasSentencePunctuation && normalizedText.length >= 24) ||
+    (hasCjk && normalizedText.length >= 16) ||
+    rawText.includes('\n')
+  )
+}
+
+function getLinkTextDensity(element: HTMLElement, normalizedText: string): number {
+  if (!normalizedText) {
+    return 0
+  }
+
+  const linkTextLength = Array.from(element.querySelectorAll('a')).reduce((total, link) => {
+    return total + normalizeTextContent(link.textContent || '').length
+  }, 0)
+
+  return linkTextLength / normalizedText.length
+}
+
+function normalizeTextContent(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+function normalizeExtractedHtml(html: string): string {
+  return html.trim().replace(/\n\s*\n+/g, '\n')
 }
 
 function getPreferredMainElement(): HTMLElement {
