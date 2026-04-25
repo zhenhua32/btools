@@ -4,6 +4,7 @@ import type { AiChatMessage, AiSettings, TranslationStrategy } from './ai-types'
 export interface TranslateTextOptions {
   settings: AiSettings
   strategy?: TranslationStrategy
+  concurrencyLimit?: number
   fallbackToParagraphsOnFailure?: boolean
   preserveParagraphOnFailure?: boolean
   onProgress?: (message: string) => void
@@ -179,22 +180,29 @@ async function translateParagraphs(
     throw new Error('未识别到可翻译的段落')
   }
 
-  const results: string[] = []
+  const results: string[] = new Array(paragraphs.length)
+  let completedCount = 0
+  let currentIndex = 0
+  const concurrencyLimit = options.concurrencyLimit ?? 3
 
-  for (let index = 0; index < paragraphs.length; index += 1) {
-    options.onProgress?.(`正在翻译第 ${index + 1} / ${paragraphs.length} 段...`)
-
-    try {
-      results.push(await requestTranslatedContent(paragraphs[index], options.settings, true))
-    } catch (error) {
-      if (!options.preserveParagraphOnFailure || !canPreserveSourceParagraph(error)) {
-        throw error
+  const workers = Array(concurrencyLimit).fill(null).map(async () => {
+    while (currentIndex < paragraphs.length) {
+      const index = currentIndex++
+      try {
+        results[index] = await requestTranslatedContent(paragraphs[index], options.settings, true)
+      } catch (error) {
+        if (!options.preserveParagraphOnFailure || !canPreserveSourceParagraph(error)) {
+          throw error
+        }
+        results[index] = paragraphs[index]
+      } finally {
+        completedCount++
+        options.onProgress?.(`已完成翻译 ${completedCount} / ${paragraphs.length} 段...`)
       }
-
-      results.push(paragraphs[index])
-      options.onProgress?.(`第 ${index + 1} / ${paragraphs.length} 段未返回可用译文，已保留原文继续处理...`)
     }
-  }
+  })
+
+  await Promise.all(workers)
 
   return {
     text: results.join('\n\n'),
