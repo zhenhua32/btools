@@ -110,6 +110,12 @@ const GENERIC_TEXT_CONTAINER_TAGS = new Set(['DIV', 'SECTION', 'ARTICLE', 'MAIN'
 // 这些容器应作为整体翻译单元，避免内部每个 li / td / dd 分别成段
 const ATOMIC_CONTAINER_TAGS = new Set(['UL', 'OL', 'TABLE', 'DL'])
 
+const HIGH_CONFIDENCE_TEXT_SELECTOR =
+  'p, h1, h2, h3, h4, h5, h6, blockquote, pre, figcaption, ul, ol, table, dl'
+
+const MAIN_ROOT_CANDIDATE_SELECTOR =
+  'main, article, [role="main"], .article, .post, .content, .article-content, .post-content, .entry-content, #content, #main, [id*="content" i], [class*="content" i], [class*="article" i], [class*="post" i], [class*="entry" i]'
+
 const EXCLUDED_PAGE_TRANSLATE_HINT_PATTERN =
   /(share|social|comment|related|recommend|breadcrumb|pagination|newsletter|subscribe|advert|ads|cookie|author|byline|meta|toolbar|reaction|promo|banner|outbrain|taboola)/i
 
@@ -249,6 +255,11 @@ function extractPageContent(runtimeState: PageTranslateRuntimeState): ExtractedP
 }
 
 function collectTranslatableBlocks(rootElement: HTMLElement): ExtractedTextBlock[] {
+  const highConfidenceBlocks = collectHighConfidenceBlocks(rootElement)
+  if (isHighConfidenceCoverageEnough(highConfidenceBlocks, rootElement)) {
+    return highConfidenceBlocks
+  }
+
   const textBlocks: ExtractedTextBlock[] = []
 
   const walk = (element: HTMLElement): boolean => {
@@ -292,6 +303,57 @@ function collectTranslatableBlocks(rootElement: HTMLElement): ExtractedTextBlock
   return textBlocks
 }
 
+function collectHighConfidenceBlocks(rootElement: HTMLElement): ExtractedTextBlock[] {
+  const blocks: ExtractedTextBlock[] = []
+  const candidates: HTMLElement[] = []
+
+  if (rootElement.matches(HIGH_CONFIDENCE_TEXT_SELECTOR)) {
+    candidates.push(rootElement)
+  }
+
+  candidates.push(...Array.from(rootElement.querySelectorAll<HTMLElement>(HIGH_CONFIDENCE_TEXT_SELECTOR)))
+
+  for (const element of candidates) {
+    if (shouldSkipPageTranslateElement(element, rootElement)) {
+      continue
+    }
+
+    if (blocks.some((block) => block.element.contains(element))) {
+      continue
+    }
+
+    const html = getExtractedBlockHtml(element)
+    if (!html) {
+      continue
+    }
+
+    blocks.push({ element, html })
+  }
+
+  return blocks
+}
+
+function isHighConfidenceCoverageEnough(
+  blocks: ExtractedTextBlock[],
+  rootElement: HTMLElement,
+): boolean {
+  if (blocks.length < 2) {
+    return false
+  }
+
+  const rootTextLength = normalizeTextContent(rootElement.innerText || rootElement.textContent || '').length
+  if (rootTextLength <= 0) {
+    return false
+  }
+
+  const blockTextLength = blocks.reduce((total, block) => {
+    return total + normalizeTextContent(block.element.innerText || block.element.textContent || '').length
+  }, 0)
+  const coverage = blockTextLength / rootTextLength
+
+  return coverage >= 0.42 || blocks.length >= 8
+}
+
 function shouldSkipPageTranslateElement(element: HTMLElement, rootElement: HTMLElement): boolean {
   const tag = element.tagName.toUpperCase()
 
@@ -312,6 +374,8 @@ function shouldSkipPageTranslateElement(element: HTMLElement, rootElement: HTMLE
     element !== rootElement &&
     (element.closest('[data-btools-page-translation]') ||
       element.closest('nav, footer, aside, form, dialog, menu, [role="navigation"], [role="complementary"], [role="search"], [role="dialog"], [role="tablist"]') ||
+      (rootElement === document.body &&
+        element.closest('header, [role="banner"], [role="contentinfo"]')) ||
       hasExcludedSemanticContext(element, rootElement))
   ) {
     return true
@@ -372,6 +436,7 @@ function shouldUseAsTextBlock(element: HTMLElement): boolean {
   const wordCount = normalizedText.split(/\s+/).filter(Boolean).length
   const hasCjk = /[\u4e00-\u9fff]/.test(normalizedText)
   const hasSentencePunctuation = /[。！？.!?;；:：]/.test(normalizedText)
+  const hasLineBreak = /[\r\n]/.test(rawText)
   const linkDensity = getLinkTextDensity(element, normalizedText)
 
   if (linkDensity > 0.65) {
@@ -385,11 +450,15 @@ function shouldUseAsTextBlock(element: HTMLElement): boolean {
 
   if (STRUCTURAL_TEXT_TAGS.has(tag)) {
     if (tag.startsWith('H')) {
-      return normalizedText.length >= 4
+      return normalizedText.length >= 6
     }
 
     if (tag === 'LI') {
-      return normalizedText.length >= 6 || wordCount >= 3 || hasCjk
+      return (
+        normalizedText.length >= 20 ||
+        wordCount >= 6 ||
+        (hasSentencePunctuation && (normalizedText.length >= 12 || wordCount >= 4))
+      )
     }
 
     return normalizedText.length >= 12 || wordCount >= 4 || (hasCjk && normalizedText.length >= 6)
@@ -400,11 +469,10 @@ function shouldUseAsTextBlock(element: HTMLElement): boolean {
   }
 
   return (
-    normalizedText.length >= 48 ||
-    wordCount >= 10 ||
-    (hasSentencePunctuation && normalizedText.length >= 24) ||
-    (hasCjk && normalizedText.length >= 16) ||
-    rawText.includes('\n')
+    normalizedText.length >= 56 ||
+    wordCount >= 12 ||
+    (hasSentencePunctuation && normalizedText.length >= 28) ||
+    (hasCjk && normalizedText.length >= 22 && (hasSentencePunctuation || hasLineBreak))
   )
 }
 
@@ -429,18 +497,60 @@ function normalizeExtractedHtml(html: string): string {
 }
 
 function getPreferredMainElement(): HTMLElement {
-  const candidates = Array.from(
-    document.querySelectorAll<HTMLElement>('main, article, [role="main"], .article, .post, .content'),
-  )
-    .sort((left, right) => (right.innerText || '').length - (left.innerText || '').length)
+  const bodyTextLength = normalizeTextContent(document.body.innerText || document.body.textContent || '').length
 
-  // 如果找到合适的内容区，将其作为根，否则使用 body
-  const main = candidates[0]
-  if (main && (main.innerText || '').length > 300) {
-    return main
+  const candidates = Array.from(document.querySelectorAll<HTMLElement>(MAIN_ROOT_CANDIDATE_SELECTOR))
+    .map((element) => {
+      const { score, textLength } = scoreMainElementCandidate(element, bodyTextLength)
+      return { element, score, textLength }
+    })
+    .filter((candidate) => candidate.score > 0)
+    .sort((left, right) => right.score - left.score)
+
+  const bestCandidate = candidates[0]
+  if (bestCandidate && bestCandidate.textLength >= 260) {
+    return bestCandidate.element
   }
 
   return document.body
+}
+
+function scoreMainElementCandidate(
+  element: HTMLElement,
+  bodyTextLength: number,
+): { score: number; textLength: number } {
+  const normalizedText = normalizeTextContent(element.innerText || element.textContent || '')
+  const textLength = normalizedText.length
+
+  if (textLength < 220) {
+    return { score: -1, textLength }
+  }
+
+  if (hasExcludedSemanticHint(element)) {
+    return { score: -1, textLength }
+  }
+
+  const coverageRatio = bodyTextLength > 0 ? textLength / bodyTextLength : 1
+  if (coverageRatio > 0.96) {
+    return { score: -1, textLength }
+  }
+
+  const linkDensity = getLinkTextDensity(element, normalizedText)
+  if (linkDensity > 0.58) {
+    return { score: -1, textLength }
+  }
+
+  const paragraphLikeCount = Math.min(
+    20,
+    element.querySelectorAll('p, h1, h2, h3, blockquote, pre, li').length,
+  )
+  const semanticBoost = element.matches('main, article, [role="main"]') ? 220 : 0
+  const coveragePenalty = Math.max(0, coverageRatio - 0.72) * 700
+
+  return {
+    score: textLength + paragraphLikeCount * 24 + semanticBoost - linkDensity * 320 - coveragePenalty,
+    textLength,
+  }
 }
 
 function submitPageContent(message: PageTranslateSubmitMessage): void {
