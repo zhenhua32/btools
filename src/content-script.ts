@@ -163,10 +163,15 @@ function handlePageTranslateStatus(
   }
 
   if (message.payload.status === 'success') {
-    if (message.payload.paragraphs && runtimeState.nodeElementsMap) {
+    if (
+      message.payload.strategyUsed === 'paragraph-by-paragraph' &&
+      message.payload.paragraphs &&
+      runtimeState.nodeElementsMap &&
+      message.payload.paragraphs.length === runtimeState.nodeElementsMap.length
+    ) {
       const { paragraphs } = message.payload
       const { nodeElementsMap } = runtimeState
-      for (let i = 0; i < Math.min(paragraphs.length, nodeElementsMap.length); i++) {
+      for (let i = 0; i < nodeElementsMap.length; i++) {
         nodeElementsMap[i].innerHTML = paragraphs[i]
       }
     }

@@ -147,8 +147,7 @@ async function handlePageTranslateSubmit(
 
     const result = await translateTextWithAi(message.payload.text, {
       settings,
-      strategy: 'whole-document',
-      fallbackToParagraphsOnFailure: true,
+      strategy: 'paragraph-by-paragraph',
       onProgress: (progressMessage) => {
         sendPageTranslateStatus(tabId, {
           requestId: message.payload.requestId,
