@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { extractPageContentFromDocument } from './page-translate-extractor'
 import arxivFixtureHtml from './fixtures/page-translate-arxiv.html?raw'
+import commentLikeFixtureHtml from './fixtures/page-translate-comment-like.html?raw'
 
 function repeatSentence(sentence: string, count: number): string {
   return Array.from({ length: count }, () => sentence).join(' ')
@@ -35,33 +36,14 @@ describe('extractPageContentFromDocument', () => {
   })
 
   it('still excludes small comment-like regions inside the main content area', () => {
-    const paragraph = repeatSentence(
-      'The main article body should be extracted for translation and keep its structural paragraphs intact.',
-      6,
-    )
-    const comment = repeatSentence(
-      'Readers can leave comments, reactions, and related discussion in this sidebar widget.',
-      3,
-    )
-
-    document.body.innerHTML = `
-      <main class="article-content">
-        <h1>Main Content</h1>
-        <p>${paragraph}</p>
-        <section>
-          <h2>Details</h2>
-          <p>${paragraph}</p>
-        </section>
-        <aside class="related-comments">
-          <p>${comment}</p>
-        </aside>
-      </main>
-    `
+    document.body.innerHTML = commentLikeFixtureHtml
 
     const extracted = extractPageContentFromDocument(document)
 
     expect(extracted.text).toContain('Main Content')
     expect(extracted.text).toContain('Details')
-    expect(extracted.text).not.toContain(comment)
+    expect(extracted.text).not.toContain(
+      'Readers can leave comments, reactions, and related discussion in this sidebar widget.',
+    )
   })
 })
