@@ -198,6 +198,8 @@ function handlePageTranslateStatus(
           }
 
       runtimeState.selectionSnapshot = undefined
+      window.getSelection()?.removeAllRanges()
+
       runtimeState.overlay.setSuccess({
         title: message.payload.title,
         url: message.payload.url,
