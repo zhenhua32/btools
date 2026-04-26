@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { extractPageContentFromDocument } from './page-translate-extractor'
+import arxivFixtureHtml from './fixtures/page-translate-arxiv.html?raw'
 
 function repeatSentence(sentence: string, count: number): string {
   return Array.from({ length: count }, () => sentence).join(' ')
@@ -17,42 +18,12 @@ describe('extractPageContentFromDocument', () => {
   it('extracts multiple text blocks from an arXiv-like article layout', () => {
     document.title = 'arXiv regression fixture'
     window.history.replaceState({}, '', '/html/2604.21910v1')
-
-    const paragraph = repeatSentence(
-      'Scientific workflow systems automate execution while preserving reproducibility across complex research pipelines.',
-      12,
-    )
     const bibliography = repeatSentence(
       'Pegasus is a workflow management system for science automation and future generation platforms.',
       4,
     )
 
-    document.body.innerHTML = `
-      <div class="ltx_page_content">
-        <article class="ltx_document ltx_authors_1line">
-          <h1 class="ltx_title ltx_title_document">From Research Question to Scientific Workflow</h1>
-          <div class="ltx_abstract" id="abstract1">
-            <h6 class="ltx_title ltx_title_abstract">Abstract</h6>
-            <p class="ltx_p">${paragraph}</p>
-          </div>
-          <section>
-            <h2 class="ltx_title ltx_title_section">1 Introduction</h2>
-            <div class="ltx_para" id="S1.p1"><p class="ltx_p">${paragraph}</p></div>
-            <div class="ltx_para" id="S1.p2"><p class="ltx_p">${paragraph}</p></div>
-            <div class="ltx_para" id="S1.p3"><p class="ltx_p">${paragraph}</p></div>
-          </section>
-          <section>
-            <h2 class="ltx_title ltx_title_section">2 Architecture</h2>
-            <div class="ltx_para" id="S2.p1"><p class="ltx_p">${paragraph}</p></div>
-            <div class="ltx_para" id="S2.p2"><p class="ltx_p">${paragraph}</p></div>
-            <div class="ltx_para" id="S2.p3"><p class="ltx_p">${paragraph}</p></div>
-          </section>
-        </article>
-      </div>
-      <ol class="ltx_biblist">
-        <li id="bib.bib2" class="ltx_bibitem ltx_bib_article">${bibliography}</li>
-      </ol>
-    `
+    document.body.innerHTML = arxivFixtureHtml
 
     const extracted = extractPageContentFromDocument(document)
 
