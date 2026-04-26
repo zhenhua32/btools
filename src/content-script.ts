@@ -2,52 +2,22 @@ import {
   extractPageContentFromDocument,
   type ExtractedPageContent,
 } from '@/services/page-translate-extractor'
-
-const PAGE_TRANSLATE_START_MESSAGE_TYPE = 'btools:page-translate-start'
-const PAGE_TRANSLATE_SUBMIT_MESSAGE_TYPE = 'btools:page-translate-submit'
-const PAGE_TRANSLATE_STATUS_MESSAGE_TYPE = 'btools:page-translate-status'
-
-interface PageTranslateStartMessage {
-  type: typeof PAGE_TRANSLATE_START_MESSAGE_TYPE
-  payload: {
-    requestId: string
-  }
-}
-
-interface PageTranslateSubmitMessage {
-  type: typeof PAGE_TRANSLATE_SUBMIT_MESSAGE_TYPE
-  payload: {
-    requestId: string
-    text: string
-    title: string
-    url: string
-  }
-}
-
-interface PageTranslateStatusMessage {
-  type: typeof PAGE_TRANSLATE_STATUS_MESSAGE_TYPE
-  payload:
-    | {
-        requestId: string
-        status: 'loading'
-        message: string
-      }
-    | {
-        requestId: string
-        status: 'error'
-        message: string
-      }
-    | {
-        requestId: string
-        status: 'success'
-        title: string
-        url: string
-        translatedText: string
-        paragraphs?: string[]
-        targetLanguage: string
-        strategyUsed: 'whole-document' | 'paragraph-by-paragraph'
-      }
-}
+import {
+  applySelectionTranslation,
+  captureSelectionSnapshot,
+  type SelectionTranslationSnapshot,
+} from '@/services/selection-translate'
+import {
+  PAGE_TRANSLATE_SELECTION_SUBMIT_MESSAGE_TYPE,
+  PAGE_TRANSLATE_SUBMIT_MESSAGE_TYPE,
+  type PageTranslateMode,
+  type PageTranslateSelectionSubmitMessage,
+  type PageTranslateStatusMessage,
+  type PageTranslateSubmitMessage,
+  type TranslationStrategy,
+  isPageTranslateStartMessage,
+  isPageTranslateStatusMessage,
+} from '@/services/ai-types'
 
 interface OverlaySuccessState {
   title: string
@@ -55,19 +25,23 @@ interface OverlaySuccessState {
   translatedText: string
   paragraphs?: string[]
   targetLanguage: string
-  strategyUsed: 'whole-document' | 'paragraph-by-paragraph'
+  strategyUsed: TranslationStrategy
+  mode: PageTranslateMode
+  operationMessage?: string
 }
 
 interface PageTranslateRuntimeState {
   activeRequestId: string
   overlay: ReturnType<typeof createTranslationOverlay>
   nodeElementsMap?: HTMLElement[]
+  selectionSnapshot?: SelectionTranslationSnapshot
 }
 
 const globalScope = globalThis as typeof globalThis & {
   __btoolsPageTranslateInitialized?: boolean
   __btoolsPageTranslateState?: PageTranslateRuntimeState
   __btoolsPageTranslateStart?: (requestId: string) => void
+  __btoolsPageTranslateSelectionStart?: (requestId: string) => void
 }
 
 if (!globalScope.__btoolsPageTranslateState) {
@@ -76,6 +50,8 @@ if (!globalScope.__btoolsPageTranslateState) {
     overlay: createTranslationOverlay({
       onClose: () => {
         state.activeRequestId = ''
+        state.selectionSnapshot = undefined
+        state.nodeElementsMap = undefined
       },
     }),
   }
@@ -87,7 +63,14 @@ const runtimeState = globalScope.__btoolsPageTranslateState
 
 globalScope.__btoolsPageTranslateStart = (requestId: string) => {
   runtimeState.activeRequestId = requestId
+  runtimeState.selectionSnapshot = undefined
   void beginPageTranslation(runtimeState, requestId)
+}
+
+globalScope.__btoolsPageTranslateSelectionStart = (requestId: string) => {
+  runtimeState.activeRequestId = requestId
+  runtimeState.nodeElementsMap = undefined
+  void beginSelectionTranslation(runtimeState, requestId)
 }
 
 if (!globalScope.__btoolsPageTranslateInitialized) {
@@ -147,6 +130,41 @@ async function beginPageTranslation(
   }
 }
 
+async function beginSelectionTranslation(
+  runtimeState: PageTranslateRuntimeState,
+  requestId: string,
+): Promise<void> {
+  runtimeState.overlay.show()
+  runtimeState.overlay.setLoading('正在读取选中内容...')
+
+  try {
+    const snapshot = captureSelectionSnapshot(document)
+    if (requestId !== runtimeState.activeRequestId) {
+      return
+    }
+
+    runtimeState.selectionSnapshot = snapshot
+    runtimeState.overlay.setMeta(document.title.trim() || '未命名页面', window.location.href)
+
+    submitPageContent({
+      type: PAGE_TRANSLATE_SELECTION_SUBMIT_MESSAGE_TYPE,
+      payload: {
+        requestId,
+        text: snapshot.text,
+        html: snapshot.html,
+        title: document.title.trim() || '未命名页面',
+        url: window.location.href,
+      },
+    })
+  } catch (error) {
+    if (requestId !== runtimeState.activeRequestId) {
+      return
+    }
+
+    runtimeState.overlay.setError(error instanceof Error ? error.message : '读取选中内容失败')
+  }
+}
+
 function handlePageTranslateStatus(
   runtimeState: PageTranslateRuntimeState,
   message: PageTranslateStatusMessage,
@@ -157,11 +175,41 @@ function handlePageTranslateStatus(
   }
 
   if (message.payload.status === 'error') {
+    if (message.payload.mode === 'selection') {
+      runtimeState.selectionSnapshot = undefined
+    }
     runtimeState.overlay.setError(message.payload.message)
     return
   }
 
   if (message.payload.status === 'success') {
+    if (message.payload.mode === 'selection') {
+      const applyResult = runtimeState.selectionSnapshot
+        ? applySelectionTranslation(runtimeState.selectionSnapshot, {
+            translatedText: message.payload.translatedText,
+            translatedHtml: message.payload.translatedHtml,
+            documentRef: document,
+          })
+        : {
+            applied: false,
+            method: 'preview-only' as const,
+            previewText: message.payload.translatedText,
+            message: '未找到原始选区，仅展示译文',
+          }
+
+      runtimeState.selectionSnapshot = undefined
+      runtimeState.overlay.setSuccess({
+        title: message.payload.title,
+        url: message.payload.url,
+        translatedText: applyResult.previewText || message.payload.translatedText,
+        targetLanguage: message.payload.targetLanguage,
+        strategyUsed: message.payload.strategyUsed,
+        mode: message.payload.mode,
+        operationMessage: applyResult.message,
+      })
+      return
+    }
+
     if (
       message.payload.strategyUsed === 'paragraph-by-paragraph' &&
       message.payload.paragraphs &&
@@ -182,6 +230,7 @@ function handlePageTranslateStatus(
       paragraphs: message.payload.paragraphs,
       targetLanguage: message.payload.targetLanguage,
       strategyUsed: message.payload.strategyUsed,
+      mode: message.payload.mode,
     })
   }
 }
@@ -189,33 +238,16 @@ function handlePageTranslateStatus(
 function extractPageContent(runtimeState: PageTranslateRuntimeState): ExtractedPageContent {
   const extracted = extractPageContentFromDocument(document)
   runtimeState.nodeElementsMap = extracted.blocks.map((block) => block.element)
+  runtimeState.selectionSnapshot = undefined
   return extracted
 }
 
-function submitPageContent(message: PageTranslateSubmitMessage): void {
+function submitPageContent(
+  message: PageTranslateSubmitMessage | PageTranslateSelectionSubmitMessage,
+): void {
   chrome.runtime.sendMessage(message, () => {
     void chrome.runtime.lastError
   })
-}
-
-function isPageTranslateStartMessage(message: unknown): message is PageTranslateStartMessage {
-  return (
-    typeof message === 'object' &&
-    message !== null &&
-    'type' in message &&
-    (message as { type?: unknown }).type === PAGE_TRANSLATE_START_MESSAGE_TYPE &&
-    'payload' in message
-  )
-}
-
-function isPageTranslateStatusMessage(message: unknown): message is PageTranslateStatusMessage {
-  return (
-    typeof message === 'object' &&
-    message !== null &&
-    'type' in message &&
-    (message as { type?: unknown }).type === PAGE_TRANSLATE_STATUS_MESSAGE_TYPE &&
-    'payload' in message
-  )
 }
 
 function createTranslationOverlay(options: { onClose: () => void }) {
@@ -559,17 +591,24 @@ function createTranslationOverlay(options: { onClose: () => void }) {
       badge.textContent = `译入 ${state.targetLanguage}`
       title.textContent = state.title
       url.textContent = state.url
-      statusText.textContent =
-        state.strategyUsed === 'paragraph-by-paragraph'
-          ? `已完成，当前结果来自逐段回退翻译${elapsedStr}`
-          : `已完成，整页翻译成功${elapsedStr}`
+      statusText.textContent = state.operationMessage
+        ? `${state.operationMessage}${elapsedStr}`
+        : state.mode === 'selection'
+          ? `已完成选中内容翻译${elapsedStr}`
+          : state.strategyUsed === 'paragraph-by-paragraph'
+            ? `已完成，当前结果来自逐段回退翻译${elapsedStr}`
+            : `已完成，整页翻译成功${elapsedStr}`
       spinner.classList.add('hidden')
       body.className = 'body'
       body.textContent = state.translatedText
       footerMeta.textContent =
-        state.strategyUsed === 'paragraph-by-paragraph'
-          ? '回退策略：逐段翻译'
-          : '策略：整页翻译'
+        state.mode === 'selection'
+          ? state.strategyUsed === 'paragraph-by-paragraph'
+            ? '策略：逐段翻译'
+            : '策略：整块翻译'
+          : state.strategyUsed === 'paragraph-by-paragraph'
+            ? '回退策略：逐段翻译'
+            : '策略：整页翻译'
       copyButton.disabled = false
 
       if (timerInterval) clearInterval(timerInterval)

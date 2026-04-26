@@ -1,6 +1,7 @@
 export type AiDisplayMode = 'paragraph-stream' | 'side-by-side'
 export type TranslationStrategy = 'whole-document' | 'paragraph-by-paragraph'
 export type AiChatRole = 'system' | 'user' | 'assistant'
+export type PageTranslateMode = 'page' | 'selection'
 
 export interface AiSettings {
   baseUrl: string
@@ -66,16 +67,29 @@ export interface PageTranslateSubmitMessage {
   }
 }
 
+export interface PageTranslateSelectionSubmitMessage {
+  type: typeof PAGE_TRANSLATE_SELECTION_SUBMIT_MESSAGE_TYPE
+  payload: {
+    requestId: string
+    text: string
+    html?: string
+    title: string
+    url: string
+  }
+}
+
 interface PageTranslateLoadingPayload {
   requestId: string
   status: 'loading'
   message: string
+  mode: PageTranslateMode
 }
 
 interface PageTranslateErrorPayload {
   requestId: string
   status: 'error'
   message: string
+  mode: PageTranslateMode
 }
 
 interface PageTranslateSuccessPayload {
@@ -84,9 +98,11 @@ interface PageTranslateSuccessPayload {
   title: string
   url: string
   translatedText: string
+  translatedHtml?: string
   paragraphs?: string[]
   targetLanguage: string
   strategyUsed: TranslationStrategy
+  mode: PageTranslateMode
 }
 
 export interface PageTranslateStatusMessage {
@@ -101,6 +117,7 @@ export const AI_SETTINGS_STORAGE_KEY = 'ai-translate-settings'
 export const AI_PROXY_MESSAGE_TYPE = 'btools:ai-chat'
 export const PAGE_TRANSLATE_START_MESSAGE_TYPE = 'btools:page-translate-start'
 export const PAGE_TRANSLATE_SUBMIT_MESSAGE_TYPE = 'btools:page-translate-submit'
+export const PAGE_TRANSLATE_SELECTION_SUBMIT_MESSAGE_TYPE = 'btools:page-translate-selection-submit'
 export const PAGE_TRANSLATE_STATUS_MESSAGE_TYPE = 'btools:page-translate-status'
 
 export const DEFAULT_AI_SETTINGS: AiSettings = {
@@ -178,12 +195,44 @@ export function isAiProxyRequestMessage(message: unknown): message is AiProxyReq
   )
 }
 
+export function isPageTranslateStartMessage(message: unknown): message is PageTranslateStartMessage {
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    'type' in message &&
+    (message as { type?: unknown }).type === PAGE_TRANSLATE_START_MESSAGE_TYPE &&
+    'payload' in message
+  )
+}
+
 export function isPageTranslateSubmitMessage(message: unknown): message is PageTranslateSubmitMessage {
   return (
     typeof message === 'object' &&
     message !== null &&
     'type' in message &&
     (message as { type?: unknown }).type === PAGE_TRANSLATE_SUBMIT_MESSAGE_TYPE &&
+    'payload' in message
+  )
+}
+
+export function isPageTranslateSelectionSubmitMessage(
+  message: unknown,
+): message is PageTranslateSelectionSubmitMessage {
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    'type' in message &&
+    (message as { type?: unknown }).type === PAGE_TRANSLATE_SELECTION_SUBMIT_MESSAGE_TYPE &&
+    'payload' in message
+  )
+}
+
+export function isPageTranslateStatusMessage(message: unknown): message is PageTranslateStatusMessage {
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    'type' in message &&
+    (message as { type?: unknown }).type === PAGE_TRANSLATE_STATUS_MESSAGE_TYPE &&
     'payload' in message
   )
 }

@@ -8,13 +8,16 @@ import {
   PAGE_TRANSLATE_STATUS_MESSAGE_TYPE,
   type AiProxyReply,
   type AiProxyRequestMessage,
+  type PageTranslateSelectionSubmitMessage,
   type PageTranslateStatusMessage,
   type PageTranslateSubmitMessage,
   isAiProxyRequestMessage,
+  isPageTranslateSelectionSubmitMessage,
   isPageTranslateSubmitMessage,
 } from '@/services/ai-types'
 
 const PAGE_TRANSLATE_MENU_ID = 'btools:page-translate'
+const PAGE_TRANSLATE_SELECTION_MENU_ID = 'btools:page-translate-selection'
 const activePageTranslationRequests = new Map<number, string>()
 
 chrome.action.onClicked.addListener(() => {
@@ -40,7 +43,18 @@ chrome.runtime.onStartup.addListener(() => {
 })
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  if (info.menuItemId !== PAGE_TRANSLATE_MENU_ID || tab?.id === undefined) {
+  if (tab?.id === undefined) {
+    return
+  }
+
+  const mode =
+    info.menuItemId === PAGE_TRANSLATE_MENU_ID
+      ? 'page'
+      : info.menuItemId === PAGE_TRANSLATE_SELECTION_MENU_ID
+        ? 'selection'
+        : null
+
+  if (!mode) {
     return
   }
 
@@ -52,14 +66,20 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: (nextRequestId: string) => {
+      func: (nextRequestId: string, nextMode: 'page' | 'selection') => {
         const scope = globalThis as typeof globalThis & {
           __btoolsPageTranslateStart?: (requestId: string) => void
+          __btoolsPageTranslateSelectionStart?: (requestId: string) => void
+        }
+
+        if (nextMode === 'selection') {
+          scope.__btoolsPageTranslateSelectionStart?.(nextRequestId)
+          return
         }
 
         scope.__btoolsPageTranslateStart?.(nextRequestId)
       },
-      args: [requestId],
+      args: [requestId, mode],
     })
   } catch {
     activePageTranslationRequests.delete(tab.id)
@@ -95,6 +115,19 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
     return true
   }
 
+  if (isPageTranslateSelectionSubmitMessage(message)) {
+    handlePageTranslateSelectionSubmit(message, sender)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error: unknown) => {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : '选中文本翻译失败',
+        })
+      })
+
+    return true
+  }
+
   return false
 })
 
@@ -118,13 +151,53 @@ async function handlePageTranslateSubmit(
   message: PageTranslateSubmitMessage,
   sender: chrome.runtime.MessageSender,
 ): Promise<void> {
+  await handleTranslationRequest(
+    {
+      requestId: message.payload.requestId,
+      title: message.payload.title,
+      url: message.payload.url,
+      text: message.payload.text,
+      mode: 'page',
+    },
+    sender,
+  )
+}
+
+async function handlePageTranslateSelectionSubmit(
+  message: PageTranslateSelectionSubmitMessage,
+  sender: chrome.runtime.MessageSender,
+): Promise<void> {
+  await handleTranslationRequest(
+    {
+      requestId: message.payload.requestId,
+      title: message.payload.title,
+      url: message.payload.url,
+      text: message.payload.text,
+      html: message.payload.html,
+      mode: 'selection',
+    },
+    sender,
+  )
+}
+
+async function handleTranslationRequest(
+  request: {
+    requestId: string
+    title: string
+    url: string
+    text: string
+    html?: string
+    mode: 'page' | 'selection'
+  },
+  sender: chrome.runtime.MessageSender,
+): Promise<void> {
   const tabId = sender.tab?.id
   if (tabId === undefined) {
     return
   }
 
   const activeRequestId = activePageTranslationRequests.get(tabId)
-  if (!activeRequestId || activeRequestId !== message.payload.requestId) {
+  if (!activeRequestId || activeRequestId !== request.requestId) {
     return
   }
 
@@ -136,45 +209,56 @@ async function handlePageTranslateSubmit(
       throw new Error(`请先在 BTools 设置页补全：${missingFields.join('、')}`)
     }
 
-    const result = await translateTextWithAi(message.payload.text, {
+    const useHtmlSource = !!request.html?.trim()
+    const result = await translateTextWithAi(useHtmlSource ? request.html ?? request.text : request.text, {
       settings,
-      strategy: 'paragraph-by-paragraph',
-      preserveParagraphOnFailure: true,
+      strategy: request.mode === 'selection' || useHtmlSource ? 'whole-document' : 'paragraph-by-paragraph',
+      sourceFormat: useHtmlSource ? 'html-fragment' : 'plain-text',
+      preserveParagraphOnFailure: request.mode === 'page',
       onProgress: (progressMessage) => {
         sendPageTranslateStatus(tabId, {
-          requestId: message.payload.requestId,
+          requestId: request.requestId,
           status: 'loading',
           message: progressMessage,
+          mode: request.mode,
         })
       },
     })
 
-    if (activePageTranslationRequests.get(tabId) !== message.payload.requestId) {
+    if (activePageTranslationRequests.get(tabId) !== request.requestId) {
       return
     }
 
     sendPageTranslateStatus(tabId, {
-      requestId: message.payload.requestId,
+      requestId: request.requestId,
       status: 'success',
-      title: message.payload.title,
-      url: message.payload.url,
-      translatedText: result.text,
-      paragraphs: result.paragraphs,
+      title: request.title,
+      url: request.url,
+      translatedText: useHtmlSource ? extractTextPreviewFromHtml(result.text) : result.text,
+      translatedHtml: useHtmlSource ? result.text : undefined,
+      paragraphs: request.mode === 'page' ? result.paragraphs : undefined,
       targetLanguage: settings.defaultTargetLanguage || '中文',
       strategyUsed: result.strategyUsed,
+      mode: request.mode,
     })
   } catch (error) {
-    if (activePageTranslationRequests.get(tabId) !== message.payload.requestId) {
+    if (activePageTranslationRequests.get(tabId) !== request.requestId) {
       return
     }
 
     sendPageTranslateStatus(tabId, {
-      requestId: message.payload.requestId,
+      requestId: request.requestId,
       status: 'error',
-      message: error instanceof Error ? error.message : '网页全文翻译失败',
+      message:
+        error instanceof Error
+          ? error.message
+          : request.mode === 'selection'
+            ? '选中文本翻译失败'
+            : '网页全文翻译失败',
+      mode: request.mode,
     })
   } finally {
-    if (activePageTranslationRequests.get(tabId) === message.payload.requestId) {
+    if (activePageTranslationRequests.get(tabId) === request.requestId) {
       activePageTranslationRequests.delete(tabId)
     }
   }
@@ -189,6 +273,22 @@ function ensurePageTranslateContextMenu(): void {
         id: PAGE_TRANSLATE_MENU_ID,
         title: '用 BTools AI 翻译全文',
         contexts: ['all'],
+        documentUrlPatterns: ['http://*/*', 'https://*/*'],
+      },
+      () => {
+        void chrome.runtime.lastError
+      },
+    )
+  })
+
+  chrome.contextMenus.remove(PAGE_TRANSLATE_SELECTION_MENU_ID, () => {
+    void chrome.runtime.lastError
+
+    chrome.contextMenus.create(
+      {
+        id: PAGE_TRANSLATE_SELECTION_MENU_ID,
+        title: '用 BTools AI 翻译选中文本',
+        contexts: ['selection'],
         documentUrlPatterns: ['http://*/*', 'https://*/*'],
       },
       () => {
@@ -242,4 +342,17 @@ function sendPageTranslateStatus(
     // 忽略因接收端不存在（例如页面被刷新或关闭）造成的报错
     void chrome.runtime.lastError
   })
+}
+
+function extractTextPreviewFromHtml(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
 }

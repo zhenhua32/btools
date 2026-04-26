@@ -4,6 +4,7 @@ import type { AiChatMessage, AiSettings, TranslationStrategy } from './ai-types'
 export interface TranslateTextOptions {
   settings: AiSettings
   strategy?: TranslationStrategy
+  sourceFormat?: 'plain-text' | 'html-fragment'
   concurrencyLimit?: number
   fallbackToParagraphsOnFailure?: boolean
   preserveParagraphOnFailure?: boolean
@@ -32,7 +33,11 @@ export async function translateTextWithAi(
     throw new Error('请输入待翻译内容')
   }
 
-  const strategy = options.strategy ?? options.settings.defaultTranslationStrategy
+  const sourceFormat = options.sourceFormat ?? 'plain-text'
+  const strategy =
+    sourceFormat === 'html-fragment'
+      ? 'whole-document'
+      : options.strategy ?? options.settings.defaultTranslationStrategy
 
   if (strategy === 'paragraph-by-paragraph') {
     return translateParagraphs(source, options)
@@ -55,21 +60,29 @@ export function buildTranslationMessages(
   settings: AiSettings,
   singleParagraph: boolean,
   retryWithoutEcho = false,
+  sourceFormat: 'plain-text' | 'html-fragment' = 'plain-text',
 ): AiChatMessage[] {
   const targetLanguage = settings.defaultTargetLanguage || '中文'
   const systemParts = [
     settings.systemPrompt,
     `将用户提供的文本翻译成${targetLanguage}。`,
-    '保留原文的段落、换行、列表、Markdown 或代码块结构。',    '输入文本可能包含内联 HTML 标签（如 <a>、<span>、<b> 等），请务必在译文中严格保留所有这些标签及其属性、并保持其原有相对位置结构，只翻译标签开头以及标签之间的可见纯文本内容。',    '只输出译文，不要解释，不要添加标题、备注或额外说明。',
+    '保留原文的段落、换行、列表、Markdown 或代码块结构。',
+    sourceFormat === 'html-fragment'
+      ? '输入内容是一个 HTML 片段。请严格保留所有 HTML 标签、标签层级、属性和值，不要新增、删除、重排或改写任何标签与属性，只翻译标签之间的可见文本内容。'
+      : '输入文本可能包含内联 HTML 标签（如 <a>、<span>、<b> 等），请务必在译文中严格保留所有这些标签及其属性、并保持其原有相对位置结构，只翻译标签开头以及标签之间的可见纯文本内容。',
+    '只输出译文，不要解释，不要添加标题、备注或额外说明。',
     '绝对不要重复、复制、附带或夹带原文。输出中禁止出现未翻译的原文段落，除非是必须保留的代码、标识符或专有格式片段。',
   ].filter(Boolean)
 
   const retryNotice = retryWithoutEcho
     ? '你上一条回答错误地包含了原文。这次只返回译文正文，不要重复原文，不要做双语对照。\n\n'
     : ''
-  const userPrompt = singleParagraph
-    ? `${retryNotice}请翻译下面这一段内容，保持原意与格式，只返回译文：\n\n${text}`
-    : `${retryNotice}请翻译下面的完整内容，并尽量保持原有段落结构，只返回译文：\n\n${text}`
+  const userPrompt =
+    sourceFormat === 'html-fragment'
+      ? `${retryNotice}请翻译下面的 HTML 片段。只翻译可见文本，不要修改标签名、属性、层级或结构，不要添加额外包装标签，只返回翻译后的 HTML 片段：\n\n${text}`
+      : singleParagraph
+        ? `${retryNotice}请翻译下面这一段内容，保持原意与格式，只返回译文：\n\n${text}`
+        : `${retryNotice}请翻译下面的完整内容，并尽量保持原有段落结构，只返回译文：\n\n${text}`
 
   return [
     { role: 'system', content: systemParts.join('\n') },
@@ -162,7 +175,12 @@ async function translateWholeDocument(
   options: TranslateTextOptions,
 ): Promise<TranslateTextResult> {
   options.onProgress?.('正在整块翻译，请稍候...')
-  const cleaned = await requestTranslatedContent(text, options.settings, false)
+  const cleaned = await requestTranslatedContent(
+    text,
+    options.settings,
+    false,
+    options.sourceFormat ?? 'plain-text',
+  )
 
   return {
     text: cleaned,
@@ -218,11 +236,12 @@ async function requestTranslatedContent(
   text: string,
   settings: AiSettings,
   singleParagraph: boolean,
+  sourceFormat: 'plain-text' | 'html-fragment' = 'plain-text',
 ): Promise<string> {
   const timeoutMs = getTranslationRequestTimeoutMs(settings)
 
   const firstPass = await requestAiChatCompletion(
-    buildTranslationMessages(text, settings, singleParagraph),
+    buildTranslationMessages(text, settings, singleParagraph, false, sourceFormat),
     {
       temperature: 0.2,
       timeoutMs,
@@ -235,7 +254,7 @@ async function requestTranslatedContent(
   }
 
   const secondPass = await requestAiChatCompletion(
-    buildTranslationMessages(text, settings, singleParagraph, true),
+    buildTranslationMessages(text, settings, singleParagraph, true, sourceFormat),
     {
       temperature: 0,
       timeoutMs,

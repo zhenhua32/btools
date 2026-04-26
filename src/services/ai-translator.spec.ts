@@ -9,7 +9,7 @@ vi.mock('./ai-client', () => ({
 }))
 
 import { DEFAULT_AI_SETTINGS, normalizeAiSettings, type AiSettings } from './ai-types'
-import { translateTextWithAi } from './ai-translator'
+import { buildTranslationMessages, translateTextWithAi } from './ai-translator'
 
 describe('AI translation timeout settings', () => {
   beforeEach(() => {
@@ -63,5 +63,40 @@ describe('AI translation timeout settings', () => {
     for (const call of requestAiChatCompletionMock.mock.calls) {
       expect(call[1]).toMatchObject({ timeoutMs: 240000 })
     }
+  })
+
+  it('forces html fragments to use whole-document translation', async () => {
+    const settings: AiSettings = {
+      ...DEFAULT_AI_SETTINGS,
+      apiKey: 'test-key',
+      model: 'test-model',
+    }
+
+    requestAiChatCompletionMock.mockResolvedValue({
+      content: '你好 <a href="https://example.com">世界</a>',
+    })
+
+    const result = await translateTextWithAi('Hello <a href="https://example.com">world</a>', {
+      settings,
+      strategy: 'paragraph-by-paragraph',
+      sourceFormat: 'html-fragment',
+    })
+
+    expect(requestAiChatCompletionMock).toHaveBeenCalledTimes(1)
+    expect(result.strategyUsed).toBe('whole-document')
+    expect(result.text).toContain('<a href="https://example.com">世界</a>')
+  })
+
+  it('builds html-fragment prompts that preserve tags and attributes', () => {
+    const messages = buildTranslationMessages(
+      '<a href="https://example.com">hello</a>',
+      DEFAULT_AI_SETTINGS,
+      false,
+      false,
+      'html-fragment',
+    )
+
+    expect(messages[0].content).toContain('HTML 片段')
+    expect(messages[1].content).toContain('只返回翻译后的 HTML 片段')
   })
 })
