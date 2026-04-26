@@ -120,12 +120,23 @@ async function translateText() {
   }, 100)
 
   try {
+    translatedParagraphs.value = splitParagraphs(sourceText.value).map(() => '')
+    translatedText.value = ''
+    
     const result = await translateTextWithAi(sourceText.value, {
       settings: cachedSettings.value,
       strategy: translationStrategy.value,
       onProgress: (message) => {
         infoMsg.value = message
       },
+      onStreamChunk: (index, _delta, fullText) => {
+         if (translationStrategy.value === 'whole-document') {
+            translatedText.value = fullText
+         } else {
+            translatedParagraphs.value[index] = fullText
+            translatedText.value = translatedParagraphs.value.join('\n\n')
+         }
+      }
     })
 
     translatedText.value = result.text

@@ -131,6 +131,27 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   return false
 })
 
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name.startsWith('btools-ai-stream-')) {
+    port.onMessage.addListener(async (msg: any) => {
+      if (isAiProxyRequestMessage(msg)) {
+        try {
+          const endpoint = resolveChatEndpoint(msg.payload.baseUrl)
+          const response = await requestChatCompletion(endpoint, msg.payload, (delta: string) => {
+             port.postMessage({ type: 'chunk', delta })
+          })
+          port.postMessage({ type: 'done', model: response.model })
+        } catch (error) {
+          port.postMessage({ 
+            type: 'error', 
+            error: error instanceof Error ? error.message : '模型接口流式调用失败' 
+          })
+        }
+      }
+    })
+  }
+})
+
 async function handleAiProxyRequest(message: AiProxyRequestMessage): Promise<AiProxyReply> {
   try {
     const endpoint = resolveChatEndpoint(message.payload.baseUrl)
@@ -230,6 +251,17 @@ async function handleTranslationRequest(
           requestId: request.requestId,
           status: 'loading',
           message: progressMessage,
+          mode: request.mode,
+        })
+      },
+      onStreamChunk: (index, delta, fullText) => {
+        if (activePageTranslationRequests.get(tabId) !== request.requestId) return
+        sendPageTranslateStatus(tabId, {
+          requestId: request.requestId,
+          status: 'streaming',
+          index,
+          delta,
+          fullText,
           mode: request.mode,
         })
       },

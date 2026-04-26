@@ -334,6 +334,17 @@ function handlePageTranslateStatus(
     return
   }
 
+  if (message.payload.status === 'streaming') {
+    if (message.payload.mode === 'page' && typeof message.payload.index === 'number') {
+      if (runtimeState.nodeElementsMap && runtimeState.nodeElementsMap[message.payload.index]) {
+        runtimeState.nodeElementsMap[message.payload.index].innerHTML = message.payload.fullText
+      }
+    } else {
+      runtimeState.overlay.setStreaming(message.payload.fullText)
+    }
+    return
+  }
+
   if (message.payload.status === 'error') {
     if (message.payload.mode === 'selection') {
       runtimeState.selectionSnapshot = undefined
@@ -742,6 +753,15 @@ function createTranslationOverlay(options: { onClose: () => void }) {
       if (timerInterval) clearInterval(timerInterval)
       timerInterval = null
       startTime = 0
+    },
+    setStreaming(text: string) {
+      translatedText = text
+      badge.textContent = '打字中'
+      statusText.textContent = '正在为您翻译...'
+      spinner.classList.remove('hidden')
+      body.className = 'body success'
+      body.innerHTML = text
+      copyButton.disabled = !text
     },
     setSuccess(state: OverlaySuccessState) {
       let elapsedStr = ''

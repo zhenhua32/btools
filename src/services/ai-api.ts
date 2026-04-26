@@ -20,6 +20,7 @@ export function resolveChatEndpoint(baseUrl: string): string {
 export async function requestChatCompletion(
   endpoint: string,
   payload: AiProxyRequestPayload,
+  onStreamChunk?: (delta: string, fullText: string) => void
 ): Promise<{ content: string; model?: string }> {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), payload.timeoutMs ?? 60000)
@@ -36,17 +37,81 @@ export async function requestChatCompletion(
         messages: payload.messages,
         temperature: payload.temperature ?? 0.2,
         max_tokens: payload.maxTokens,
-        stream: false,
+        stream: payload.stream ?? false,
       }),
       signal: controller.signal,
     })
 
-    const body = await parseResponseBody(response)
-
     if (!response.ok) {
-      const errorMessage = getErrorMessage(body) || `模型接口返回 ${response.status}`
-      throw new Error(errorMessage)
+      if (payload.stream) {
+         const body = await parseResponseBody(response)
+         const errorMessage = getErrorMessage(body) || `模型接口返回 ${response.status}`
+         throw new Error(errorMessage)
+      } else {
+         const body = await parseResponseBody(response)
+         const errorMessage = getErrorMessage(body) || `模型接口返回 ${response.status}`
+         throw new Error(errorMessage)
+      }
     }
+
+    if (payload.stream && response.body) {
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder('utf-8')
+      let fullContent = ''
+      let detectedModel = ''
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        
+        // Keep the last segment as buffer if it doesn't end with newline
+        buffer = lines.pop() || ''
+        
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed) continue
+          if (trimmed === 'data: [DONE]') {
+            break
+          }
+          
+          if (trimmed.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(trimmed.slice(6))
+              if (data.model) detectedModel = data.model
+              
+              const delta = data.choices?.[0]?.delta?.content || ''
+              if (delta) {
+                fullContent += delta
+                onStreamChunk?.(delta, fullContent)
+              }
+            } catch (e) {
+              // skip parsing errors on chunks, wait for next clean parse? No, if JSON error it's already popped from buffer.
+              // Actually OpenAI SSE uses two newlines `\n\n` to end a frame. Our splitting by `\n` works because JSON is 1 line.
+            }
+          }
+        }
+      }
+      
+      // Attempt to decode any remaining buffer
+      if (buffer.trim() && buffer.trim().startsWith('data: ') && buffer.trim() !== 'data: [DONE]') {
+        try {
+           const data = JSON.parse(buffer.trim().slice(6))
+           const delta = data.choices?.[0]?.delta?.content || ''
+           if (delta) {
+             fullContent += delta
+             onStreamChunk?.(delta, fullContent)
+           }
+        } catch { }
+      }
+      
+      return { content: fullContent, model: detectedModel }
+    }
+
+    const body = await parseResponseBody(response)
 
     const content = extractContent(body)
     if (!content) {

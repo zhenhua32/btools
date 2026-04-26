@@ -9,6 +9,7 @@ export interface TranslateTextOptions {
   fallbackToParagraphsOnFailure?: boolean
   preserveParagraphOnFailure?: boolean
   onProgress?: (message: string) => void
+  onStreamChunk?: (index: number, delta: string, fullText: string) => void
 }
 
 export interface TranslateTextResult {
@@ -180,6 +181,8 @@ async function translateWholeDocument(
     options.settings,
     false,
     options.sourceFormat ?? 'plain-text',
+    options,
+    0
   )
 
   return {
@@ -210,7 +213,7 @@ async function translateParagraphs(
     while (currentIndex < paragraphs.length) {
       const index = currentIndex++
       try {
-        results[index] = await requestTranslatedContent(paragraphs[index], options.settings, true)
+        results[index] = await requestTranslatedContent(paragraphs[index], options.settings, true, 'plain-text', options, index)
       } catch (error) {
         if (!options.preserveParagraphOnFailure || !canPreserveSourceParagraph(error)) {
           throw error
@@ -237,6 +240,8 @@ async function requestTranslatedContent(
   settings: AiSettings,
   singleParagraph: boolean,
   sourceFormat: 'plain-text' | 'html-fragment' = 'plain-text',
+  options?: TranslateTextOptions,
+  index = 0,
 ): Promise<string> {
   const timeoutMs = getTranslationRequestTimeoutMs(settings)
 
@@ -245,6 +250,8 @@ async function requestTranslatedContent(
     {
       temperature: 0.2,
       timeoutMs,
+      enableStreaming: settings.enableStreaming,
+      onStreamChunk: (delta, fullText) => options?.onStreamChunk?.(index, delta, fullText),
     },
   )
   const cleanedFirstPass = sanitizeTranslationOutput(text, firstPass.content)
@@ -258,6 +265,8 @@ async function requestTranslatedContent(
     {
       temperature: 0,
       timeoutMs,
+      enableStreaming: settings.enableStreaming,
+      onStreamChunk: (delta, fullText) => options?.onStreamChunk?.(index, delta, fullText),
     },
   )
   const cleanedSecondPass = sanitizeTranslationOutput(text, secondPass.content)

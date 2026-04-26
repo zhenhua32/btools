@@ -230,6 +230,10 @@ function validateForm(): string {
 
     <NCard size="small" title="交互设置" class="settings-section">
       <NForm label-placement="top">
+        <NFormItem label="启用流式输出 (打字机效果)">
+          <NSwitch v-model:value="formState.enableStreaming" />
+        </NFormItem>
+
         <NFormItem label="启用选中文本后的悬浮翻译按钮">
           <NSwitch v-model:value="formState.enableSelectionButton" />
         </NFormItem>

@@ -11,6 +11,8 @@ interface AiChatRequestOptions {
   temperature?: number
   maxTokens?: number
   timeoutMs?: number
+  enableStreaming?: boolean
+  onStreamChunk?: (delta: string, fullTextSoFar: string) => void
 }
 
 export async function requestAiChatCompletion(
@@ -36,11 +38,47 @@ export async function requestAiChatCompletion(
     temperature: options.temperature,
     maxTokens: options.maxTokens,
     timeoutMs: options.timeoutMs ?? settings.requestTimeoutMs,
+    stream: options.enableStreaming,
   }
 
   if (isServiceWorkerContext()) {
     const endpoint = resolveChatEndpoint(payload.baseUrl)
-    return await requestChatCompletion(endpoint, payload)
+    return await requestChatCompletion(endpoint, payload, options.onStreamChunk)
+  }
+
+  if (options.enableStreaming) {
+    return new Promise((resolve, reject) => {
+      const portName = `btools-ai-stream-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+      const port = chrome.runtime.connect({ name: portName })
+      let fullContent = ''
+      let isDone = false
+      
+      port.onMessage.addListener((msg: any) => {
+        if (msg.type === 'chunk') {
+          fullContent += msg.delta || ''
+          options.onStreamChunk?.(msg.delta || '', fullContent)
+        } else if (msg.type === 'done') {
+          isDone = true
+          resolve({ content: fullContent, model: msg.model })
+          port.disconnect()
+        } else if (msg.type === 'error') {
+          isDone = true
+          reject(new Error(msg.error))
+          port.disconnect()
+        }
+      })
+      
+      port.onDisconnect.addListener(() => {
+        if (!isDone) {
+          reject(new Error('流式请求意外断开'))
+        }
+      })
+
+      port.postMessage({
+        type: AI_PROXY_MESSAGE_TYPE,
+        payload,
+      })
+    })
   }
 
   const message: AiProxyRequestMessage = {

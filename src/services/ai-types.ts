@@ -15,6 +15,7 @@ export interface AiSettings {
   requestTimeoutMs: number
   enableSelectionButton: boolean
   enableCtrlSelection: boolean
+  enableStreaming: boolean
 }
 
 export interface AiChatMessage {
@@ -30,6 +31,7 @@ export interface AiProxyRequestPayload {
   temperature?: number
   maxTokens?: number
   timeoutMs?: number
+  stream?: boolean
 }
 
 export interface AiProxyRequestMessage {
@@ -87,6 +89,15 @@ interface PageTranslateLoadingPayload {
   mode: PageTranslateMode
 }
 
+interface PageTranslateStreamingPayload {
+  requestId: string
+  status: 'streaming'
+  index: number
+  delta: string
+  fullText: string
+  mode: PageTranslateMode
+}
+
 interface PageTranslateErrorPayload {
   requestId: string
   status: 'error'
@@ -111,6 +122,7 @@ export interface PageTranslateStatusMessage {
   type: typeof PAGE_TRANSLATE_STATUS_MESSAGE_TYPE
   payload:
     | PageTranslateLoadingPayload
+    | PageTranslateStreamingPayload
     | PageTranslateErrorPayload
     | PageTranslateSuccessPayload
 }
@@ -134,6 +146,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   requestTimeoutMs: 300000,
   enableSelectionButton: true,
   enableCtrlSelection: true,
+  enableStreaming: true,
 }
 
 export const DISPLAY_MODE_OPTIONS: Array<{ label: string; value: AiDisplayMode }> = [
@@ -188,6 +201,7 @@ export function normalizeAiSettings(input?: Partial<AiSettings> | null): AiSetti
     defaultTranslationStrategy,
     enableSelectionButton: input?.enableSelectionButton ?? DEFAULT_AI_SETTINGS.enableSelectionButton,
     enableCtrlSelection: input?.enableCtrlSelection ?? DEFAULT_AI_SETTINGS.enableCtrlSelection,
+    enableStreaming: input?.enableStreaming ?? DEFAULT_AI_SETTINGS.enableStreaming,
   }
 }
 
