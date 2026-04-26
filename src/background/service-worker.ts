@@ -151,6 +151,11 @@ async function handlePageTranslateSubmit(
   message: PageTranslateSubmitMessage,
   sender: chrome.runtime.MessageSender,
 ): Promise<void> {
+  const tabId = sender.tab?.id
+  if (tabId !== undefined) {
+    activePageTranslationRequests.set(tabId, message.payload.requestId)
+  }
+
   await handleTranslationRequest(
     {
       requestId: message.payload.requestId,
@@ -167,6 +172,11 @@ async function handlePageTranslateSelectionSubmit(
   message: PageTranslateSelectionSubmitMessage,
   sender: chrome.runtime.MessageSender,
 ): Promise<void> {
+  const tabId = sender.tab?.id
+  if (tabId !== undefined) {
+    activePageTranslationRequests.set(tabId, message.payload.requestId)
+  }
+
   await handleTranslationRequest(
     {
       requestId: message.payload.requestId,

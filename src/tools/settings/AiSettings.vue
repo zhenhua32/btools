@@ -11,6 +11,7 @@ import {
   NSelect,
   NSpace,
   NText,
+  NSwitch,
 } from 'naive-ui'
 import { getAiSettings, resetAiSettings, saveAiSettings } from '@/services/ai-settings'
 import {
@@ -223,6 +224,18 @@ function validateForm(): string {
             :max="3600"
             placeholder="默认: 300"
           />
+        </NFormItem>
+      </NForm>
+    </NCard>
+
+    <NCard size="small" title="交互设置" class="settings-section">
+      <NForm label-placement="top">
+        <NFormItem label="启用选中文本后的悬浮翻译按钮">
+          <NSwitch v-model:value="formState.enableSelectionButton" />
+        </NFormItem>
+
+        <NFormItem label="划选文本时按住 Ctrl 或 Command 键直接触发翻译">
+          <NSwitch v-model:value="formState.enableCtrlSelection" />
         </NFormItem>
       </NForm>
     </NCard>

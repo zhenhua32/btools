@@ -7,6 +7,7 @@ import {
   captureSelectionSnapshot,
   type SelectionTranslationSnapshot,
 } from '@/services/selection-translate'
+import { getAiSettings } from '@/services/ai-settings'
 import {
   PAGE_TRANSLATE_SELECTION_SUBMIT_MESSAGE_TYPE,
   PAGE_TRANSLATE_SUBMIT_MESSAGE_TYPE,
@@ -91,6 +92,165 @@ if (!globalScope.__btoolsPageTranslateInitialized) {
 
     return false
   })
+
+  document.addEventListener('mouseup', async (event) => {
+    // 忽略在浮层内部的点选
+    const target = event.target as HTMLElement
+    if (target?.closest?.('[data-btools-page-translation="true"]')) {
+      return
+    }
+
+    const selection = window.getSelection()
+    const text = selection?.toString().trim()
+    console.log('[BTools] mouseup', { text, ctrlKey: event.ctrlKey, metaKey: event.metaKey })
+
+    if (!text || selection?.isCollapsed) {
+      hideSelectionFloatButton()
+      return
+    }
+
+    const settings = await getAiSettings()
+    console.log('[BTools] settings', { enableCtrlSelection: settings.enableCtrlSelection, enableSelectionButton: settings.enableSelectionButton })
+
+    // 若配置开启且按住了 CTRL/CMD 键，则直接翻译
+    if (settings.enableCtrlSelection && (event.ctrlKey || event.metaKey)) {
+      hideSelectionFloatButton()
+      const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+      globalScope.__btoolsPageTranslateSelectionStart?.(requestId)
+      return
+    }
+
+    // 若配置开启，显示悬浮按钮
+    if (settings.enableSelectionButton) {
+      showSelectionFloatButton(event, () => {
+        const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+        globalScope.__btoolsPageTranslateSelectionStart?.(requestId)
+      })
+    } else {
+      hideSelectionFloatButton()
+    }
+  })
+
+  // 当选取发生任何非结束调整时，尝试清理弹窗或隐藏，这要看需不需要，暂时让 mousedown/selectionchange 隐藏
+  document.addEventListener('mousedown', (event) => {
+    const target = event.target as HTMLElement
+    if (!target?.closest?.('[data-btools-page-translation="true"]')) {
+      hideSelectionFloatButton()
+    }
+  })
+}
+
+// ============== 选区悬浮按钮 DOM 管理 ================
+let floatButtonHost: HTMLElement | null = null
+
+function getOrCreateFloatButton(): HTMLElement {
+  if (floatButtonHost) {
+    return floatButtonHost
+  }
+
+  floatButtonHost = document.createElement('div')
+  floatButtonHost.setAttribute('data-btools-page-translation', 'true')
+  const shadowRoot = floatButtonHost.attachShadow({ mode: 'open' })
+
+  const style = document.createElement('style')
+  style.textContent = `
+    :host {
+      all: initial;
+    }
+    .selection-btn {
+      position: absolute;
+      z-index: 2147483647;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: #0ea5e9;
+      color: #fff;
+      font-size: 13px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(14, 165, 233, 0.4);
+      user-select: none;
+      transition: all 0.2s ease-out;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    .selection-btn:hover {
+      background: #0284c7;
+      transform: translateY(-1px);
+    }
+    .selection-btn.visible {
+      display: flex;
+    }
+    .icon {
+      margin-right: 4px;
+      width: 14px;
+      height: 14px;
+      fill: currentColor;
+    }
+  `
+
+  const btn = document.createElement('div')
+  btn.className = 'selection-btn'
+  btn.innerHTML = `
+    <svg class="icon" viewBox="0 0 24 24"><path d="M12.87 15.07l-2.54-2.51.03-.03A17.52 17.52 0 0 0 14.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04M18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12m-2.62 7l1.62-4.33L19.12 17h-3.24Z"/></svg>
+    翻译
+`
+
+  shadowRoot.appendChild(style)
+  shadowRoot.appendChild(btn)
+  
+  if (document.body) {
+    document.body.appendChild(floatButtonHost)
+  } else {
+    document.documentElement.appendChild(floatButtonHost)
+  }
+
+  return floatButtonHost
+}
+
+let onFloatButtonClick: ((e: Event) => void) | null = null
+
+function showSelectionFloatButton(event: MouseEvent, onClick: () => void) {
+  const host = getOrCreateFloatButton()
+  const btn = host.shadowRoot?.querySelector('.selection-btn') as HTMLElement
+  if (!btn) return
+
+  // 计算位置：鼠标正下方一点点，防止挡住选区
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0) return
+  
+  const range = selection.getRangeAt(0)
+  const rect = range.getBoundingClientRect()
+  
+  // 综合考虑鼠标位置和选区位置
+  const top = window.scrollY + Math.max(event.clientY + 12, rect.bottom + 8)
+  const left = window.scrollX + event.clientX
+
+  btn.style.top = `${top}px`
+  btn.style.left = `${left}px`
+  btn.classList.add('visible')
+
+  onFloatButtonClick = (e: Event) => {
+    e.preventDefault()
+    e.stopPropagation()
+    hideSelectionFloatButton()
+    onClick()
+  }
+  
+  btn.onmousedown = (e) => e.stopPropagation() // 防止触发全局 mousedown 而自己消失
+  btn.onclick = onFloatButtonClick
+}
+
+function hideSelectionFloatButton() {
+  if (!floatButtonHost) return
+  const btn = floatButtonHost.shadowRoot?.querySelector('.selection-btn')
+  if (btn) {
+    btn.classList.remove('visible')
+    if (onFloatButtonClick) {
+      btn.removeEventListener('click', onFloatButtonClick)
+      onFloatButtonClick = null
+    }
+  }
 }
 
 async function beginPageTranslation(

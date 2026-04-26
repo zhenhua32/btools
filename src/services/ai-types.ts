@@ -13,6 +13,8 @@ export interface AiSettings {
   defaultTranslationStrategy: TranslationStrategy
   concurrencyLimit: number
   requestTimeoutMs: number
+  enableSelectionButton: boolean
+  enableCtrlSelection: boolean
 }
 
 export interface AiChatMessage {
@@ -130,6 +132,8 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   defaultTranslationStrategy: 'whole-document',
   concurrencyLimit: 3,
   requestTimeoutMs: 300000,
+  enableSelectionButton: true,
+  enableCtrlSelection: true,
 }
 
 export const DISPLAY_MODE_OPTIONS: Array<{ label: string; value: AiDisplayMode }> = [
@@ -182,6 +186,8 @@ export function normalizeAiSettings(input?: Partial<AiSettings> | null): AiSetti
         ? Math.round(input.requestTimeoutMs)
         : DEFAULT_AI_SETTINGS.requestTimeoutMs,
     defaultTranslationStrategy,
+    enableSelectionButton: input?.enableSelectionButton ?? DEFAULT_AI_SETTINGS.enableSelectionButton,
+    enableCtrlSelection: input?.enableCtrlSelection ?? DEFAULT_AI_SETTINGS.enableCtrlSelection,
   }
 }
 
