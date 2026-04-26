@@ -219,11 +219,13 @@ async function requestTranslatedContent(
   settings: AiSettings,
   singleParagraph: boolean,
 ): Promise<string> {
+  const timeoutMs = getTranslationRequestTimeoutMs(settings)
+
   const firstPass = await requestAiChatCompletion(
     buildTranslationMessages(text, settings, singleParagraph),
     {
       temperature: 0.2,
-      timeoutMs: singleParagraph ? 60000 : 90000,
+      timeoutMs,
     },
   )
   const cleanedFirstPass = sanitizeTranslationOutput(text, firstPass.content)
@@ -236,7 +238,7 @@ async function requestTranslatedContent(
     buildTranslationMessages(text, settings, singleParagraph, true),
     {
       temperature: 0,
-      timeoutMs: singleParagraph ? 60000 : 90000,
+      timeoutMs,
     },
   )
   const cleanedSecondPass = sanitizeTranslationOutput(text, secondPass.content)
@@ -259,6 +261,10 @@ async function requestTranslatedContent(
   }
 
   return cleanedSecondPass
+}
+
+function getTranslationRequestTimeoutMs(settings: AiSettings): number {
+  return settings.requestTimeoutMs > 0 ? settings.requestTimeoutMs : 300000
 }
 
 function buildEmptyTranslationError(

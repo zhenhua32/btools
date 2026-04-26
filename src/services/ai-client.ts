@@ -35,7 +35,7 @@ export async function requestAiChatCompletion(
     messages,
     temperature: options.temperature,
     maxTokens: options.maxTokens,
-    timeoutMs: options.timeoutMs,
+    timeoutMs: options.timeoutMs ?? settings.requestTimeoutMs,
   }
 
   if (isServiceWorkerContext()) {

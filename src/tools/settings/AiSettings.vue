@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onActivated, onMounted, reactive, ref } from 'vue'
+import { computed, onActivated, onMounted, reactive, ref } from 'vue'
 import {
   NAlert,
   NButton,
@@ -25,6 +25,12 @@ const errorMsg = ref('')
 const successMsg = ref('')
 const saving = ref(false)
 const loading = ref(false)
+const timeoutSeconds = computed<number | null>({
+  get: () => Math.max(1, Math.round(formState.requestTimeoutMs / 1000)),
+  set: (value: number | null) => {
+    formState.requestTimeoutMs = typeof value === 'number' && value > 0 ? Math.round(value * 1000) : 0
+  },
+})
 
 onMounted(loadStoredSettings)
 onActivated(loadStoredSettings)
@@ -105,6 +111,10 @@ function validateForm(): string {
 
   if (!formState.defaultTargetLanguage.trim()) {
     return '请填写默认目标语言'
+  }
+
+  if (!(formState.requestTimeoutMs > 0)) {
+    return '请求超时时间必须大于 0 秒'
   }
 
   return ''
@@ -203,6 +213,15 @@ function validateForm(): string {
             :min="1"
             :max="10"
             placeholder="默认: 3"
+          />
+        </NFormItem>
+
+        <NFormItem label="请求超时（秒）">
+          <NInputNumber
+            v-model:value="timeoutSeconds"
+            :min="1"
+            :max="3600"
+            placeholder="默认: 300"
           />
         </NFormItem>
       </NForm>

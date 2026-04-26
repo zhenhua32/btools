@@ -11,6 +11,7 @@ export interface AiSettings {
   defaultDisplayMode: AiDisplayMode
   defaultTranslationStrategy: TranslationStrategy
   concurrencyLimit: number
+  requestTimeoutMs: number
 }
 
 export interface AiChatMessage {
@@ -111,6 +112,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   defaultDisplayMode: 'paragraph-stream',
   defaultTranslationStrategy: 'whole-document',
   concurrencyLimit: 3,
+  requestTimeoutMs: 300000,
 }
 
 export const DISPLAY_MODE_OPTIONS: Array<{ label: string; value: AiDisplayMode }> = [
@@ -154,7 +156,14 @@ export function normalizeAiSettings(input?: Partial<AiSettings> | null): AiSetti
     defaultTargetLanguage:
       input?.defaultTargetLanguage?.trim() || DEFAULT_AI_SETTINGS.defaultTargetLanguage,
     defaultDisplayMode,
-    concurrencyLimit: typeof input?.concurrencyLimit === 'number' && input.concurrencyLimit > 0 ? input.concurrencyLimit : DEFAULT_AI_SETTINGS.concurrencyLimit,
+    concurrencyLimit:
+      typeof input?.concurrencyLimit === 'number' && input.concurrencyLimit > 0
+        ? input.concurrencyLimit
+        : DEFAULT_AI_SETTINGS.concurrencyLimit,
+    requestTimeoutMs:
+      typeof input?.requestTimeoutMs === 'number' && input.requestTimeoutMs > 0
+        ? Math.round(input.requestTimeoutMs)
+        : DEFAULT_AI_SETTINGS.requestTimeoutMs,
     defaultTranslationStrategy,
   }
 }
