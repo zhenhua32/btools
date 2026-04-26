@@ -25,6 +25,9 @@ npm run dev
 
 # 构建扩展
 npm run build
+
+# 测试
+npm run test
 ```
 
 ## AI 翻译说明
