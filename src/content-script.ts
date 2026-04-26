@@ -114,7 +114,7 @@ const HIGH_CONFIDENCE_TEXT_SELECTOR =
   'p, h1, h2, h3, h4, h5, h6, blockquote, pre, figcaption, ul, ol, table, dl'
 
 const MAIN_ROOT_CANDIDATE_SELECTOR =
-  'main, article, [role="main"], .article, .post, .content, .article-content, .post-content, .entry-content, #content, #main, [id*="content" i], [class*="content" i], [class*="article" i], [class*="post" i], [class*="entry" i]'
+  'main, article, [role="main"], .article, .post, .content, .article-content, .post-content, .entry-content, #content, #main, div[id*="content" i], div[class*="content" i], div[class*="article" i], div[class*="post" i], div[class*="entry" i], section[id*="content" i], section[class*="content" i], section[class*="article" i], section[class*="post" i], section[class*="entry" i], main[id*="content" i], main[class*="content" i], main[class*="article" i], main[class*="post" i], main[class*="entry" i], article[id*="content" i], article[class*="content" i], article[class*="article" i], article[class*="post" i], article[class*="entry" i]'
 
 const EXCLUDED_PAGE_TRANSLATE_HINT_PATTERN =
   /(share|social|comment|related|recommend|breadcrumb|pagination|newsletter|subscribe|advert|ads|cookie|author|byline|meta|toolbar|reaction|promo|banner|outbrain|taboola)/i
@@ -388,7 +388,7 @@ function hasExcludedSemanticContext(element: HTMLElement, rootElement: HTMLEleme
   let current: HTMLElement | null = element
 
   while (current && current !== rootElement) {
-    if (hasExcludedSemanticHint(current)) {
+    if (shouldExcludeSemanticRegion(current, rootElement)) {
       return true
     }
 
@@ -396,6 +396,24 @@ function hasExcludedSemanticContext(element: HTMLElement, rootElement: HTMLEleme
   }
 
   return false
+}
+
+function shouldExcludeSemanticRegion(element: HTMLElement, rootElement: HTMLElement): boolean {
+  if (!hasExcludedSemanticHint(element)) {
+    return false
+  }
+
+  if (!element.matches('div, section, article, main, [role="main"]')) {
+    return true
+  }
+
+  const rootTextLength = normalizeTextContent(rootElement.innerText || rootElement.textContent || '').length
+  if (rootTextLength <= 0) {
+    return true
+  }
+
+  const elementTextLength = normalizeTextContent(element.innerText || element.textContent || '').length
+  return elementTextLength / rootTextLength < 0.65
 }
 
 function hasExcludedSemanticHint(element: HTMLElement): boolean {
@@ -531,7 +549,7 @@ function scoreMainElementCandidate(
   }
 
   const coverageRatio = bodyTextLength > 0 ? textLength / bodyTextLength : 1
-  if (coverageRatio > 0.96) {
+  if (coverageRatio > 0.98) {
     return { score: -1, textLength }
   }
 
