@@ -12,13 +12,16 @@
   "dependencies": {
     "@guolao/vue-monaco-editor": "^1.6.0",
     "iconv-lite": "^0.6.3",
+    "jsqr": "^1.4.0",
     "monaco-editor": "^0.52.2",
     "naive-ui": "^2.40.1",
+    "qrcode": "^1.5.4",
     "vue": "^3.5.13",
     "vue-router": "^4.5.0"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.304",
+    "@types/qrcode": "^1.5.6",
     "@unocss/preset-uno": "^66.0.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "jsdom": "^29.0.2",
