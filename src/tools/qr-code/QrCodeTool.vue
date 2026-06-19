@@ -16,8 +16,6 @@ import {
   NSpace,
   NSpin,
   NText,
-  NUpload,
-  type UploadFileInfo,
 } from 'naive-ui'
 import {
   decodeQrCodeFromDataUrl,
@@ -45,6 +43,8 @@ const recognizedImageUrl = ref('')
 const recognizedImageWidth = ref<number | null>(null)
 const recognizedImageHeight = ref<number | null>(null)
 const recognizedFileName = ref('')
+const fileInput = ref<HTMLInputElement>()
+const pasteZone = ref<HTMLDivElement>()
 
 const errorCorrectionOptions: Array<{
   label: string
@@ -105,10 +105,11 @@ function clearGenerator() {
   generateError.value = ''
 }
 
-async function handleRecognizeFile(fileList: UploadFileInfo[]) {
-  const fileInfo = fileList[fileList.length - 1]
-  const file = fileInfo?.file
-  if (!file) return
+async function processRecognizeImage(file: File, fileName = file.name || '图片') {
+  if (!file.type.startsWith('image/')) {
+    recognizeError.value = '当前只支持识别图片格式的二维码'
+    return
+  }
 
   recognizeLoading.value = true
   recognizeError.value = ''
@@ -116,7 +117,7 @@ async function handleRecognizeFile(fileList: UploadFileInfo[]) {
   recognizedImageUrl.value = ''
   recognizedImageWidth.value = null
   recognizedImageHeight.value = null
-  recognizedFileName.value = fileInfo.name
+  recognizedFileName.value = fileName
 
   try {
     const dataUrl = await readFileAsDataUrl(file)
@@ -131,6 +132,80 @@ async function handleRecognizeFile(fileList: UploadFileInfo[]) {
   } finally {
     recognizeLoading.value = false
   }
+}
+
+function openFilePicker() {
+  fileInput.value?.click()
+}
+
+async function handleFileInputChange(event: Event) {
+  const target = event.target as HTMLInputElement | null
+  const file = target?.files?.[0]
+  if (!file) return
+
+  await processRecognizeImage(file, file.name)
+
+  if (target) {
+    target.value = ''
+  }
+}
+
+function getClipboardImageFile(clipboardData: DataTransfer | null): File | null {
+  if (!clipboardData) return null
+
+  const imageItem = Array.from(clipboardData.items).find(
+    (item) => item.kind === 'file' && item.type.startsWith('image/')
+  )
+
+  return imageItem?.getAsFile() ?? null
+}
+
+async function handleRecognizePaste(event: ClipboardEvent) {
+  const file = getClipboardImageFile(event.clipboardData)
+  if (!file) {
+    recognizeError.value = '剪贴板中没有图片，请先复制二维码图片再重试'
+    return
+  }
+
+  event.preventDefault()
+  await processRecognizeImage(file, file.name || '剪贴板图片')
+}
+
+async function readClipboardImage() {
+  recognizeError.value = ''
+
+  if (!navigator.clipboard?.read) {
+    pasteZone.value?.focus()
+    recognizeError.value = '当前环境不支持主动读取剪贴板，请点击下方粘贴区后按 Ctrl+V'
+    return
+  }
+
+  try {
+    const clipboardItems = await navigator.clipboard.read()
+
+    for (const clipboardItem of clipboardItems) {
+      const imageType = clipboardItem.types.find((type) => type.startsWith('image/'))
+      if (!imageType) continue
+
+      const imageBlob = await clipboardItem.getType(imageType)
+      const extension = imageType.split('/')[1] || 'png'
+      const file = new File([imageBlob], `clipboard-image.${extension}`, {
+        type: imageType,
+      })
+
+      await processRecognizeImage(file, '剪贴板图片')
+      return
+    }
+
+    recognizeError.value = '剪贴板中没有图片，请先复制二维码图片再重试'
+  } catch {
+    pasteZone.value?.focus()
+    recognizeError.value = '读取剪贴板失败，请点击下方粘贴区后按 Ctrl+V'
+  }
+}
+
+function focusPasteZone() {
+  pasteZone.value?.focus()
 }
 
 async function copyRecognizedText() {
@@ -255,30 +330,38 @@ onMounted(() => {
       <NGi>
         <NCard title="识别二维码" size="small" class="tool-card">
           <div class="card-body">
+            <input
+              ref="fileInput"
+              type="file"
+              accept="image/*"
+              class="hidden-file-input"
+              @change="handleFileInputChange"
+            />
+
             <NSpace align="center" wrap>
-              <NUpload
-                accept="image/*"
-                :max="1"
-                :default-upload="false"
-                :show-file-list="false"
-                @update:file-list="handleRecognizeFile"
-              >
-                <NButton type="primary" ghost>选择图片</NButton>
-              </NUpload>
+              <NButton type="primary" ghost @click="openFilePicker">选择图片</NButton>
+              <NButton @click="readClipboardImage">读取剪贴板图片</NButton>
+              <NButton @click="focusPasteZone">点击后 Ctrl+V</NButton>
               <NButton :disabled="!recognizedImageUrl && !recognizedText" @click="clearRecognizer">
                 清空识别区
               </NButton>
             </NSpace>
 
             <NText depth="3" class="helper-text">
-              支持上传本地截图或二维码图片。当前识别针对单个二维码场景优化。
+              支持上传本地截图、读取已复制到剪贴板的图片，或点击下方区域后直接按 Ctrl+V 粘贴。
             </NText>
 
             <NAlert v-if="recognizeError" type="error" closable @close="recognizeError = ''">
               {{ recognizeError }}
             </NAlert>
 
-            <div class="preview-panel">
+            <div
+              ref="pasteZone"
+              class="preview-panel paste-panel"
+              tabindex="0"
+              @click="focusPasteZone"
+              @paste="handleRecognizePaste"
+            >
               <NSpin :show="recognizeLoading">
                 <div v-if="recognizedImageUrl" class="preview-content">
                   <img :src="recognizedImageUrl" alt="待识别二维码图片" class="preview-image" />
@@ -289,7 +372,10 @@ onMounted(() => {
                     </span>
                   </p>
                 </div>
-                <NEmpty v-else description="选择一张包含二维码的图片" />
+                <div v-else class="paste-empty-state">
+                  <NEmpty description="选择图片，或把复制到剪贴板的二维码图片粘贴到这里" />
+                  <p class="meta-text">点击此区域后按 Ctrl+V，也可以直接使用“读取剪贴板图片”。</p>
+                </div>
               </NSpin>
             </div>
 
@@ -354,12 +440,38 @@ onMounted(() => {
   justify-content: center;
 }
 
+.hidden-file-input {
+  display: none;
+}
+
+.paste-panel {
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+
+.paste-panel:hover,
+.paste-panel:focus {
+  border-color: #2563eb;
+  background: #eff6ff;
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 0.12);
+}
+
 .preview-content {
   width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 12px;
+}
+
+.paste-empty-state {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
 }
 
 .preview-image {
