@@ -1,12 +1,13 @@
 # 浏览器工具集
 
-BTools 是一个基于 Vue 3 和 Chrome Extension Manifest V3 的浏览器工具集，当前包含文本处理、书签处理和 AI 翻译等工具。
+BTools 是一个基于 Vue 3 和 Chrome Extension Manifest V3 的浏览器工具集，当前包含文本处理、计算、书签处理和 AI 翻译等工具。
 
 ## 当前功能
 
 - 文本对比
 - JSON 格式化
 - 编码转换
+- Elo 胜率计算
 - 二维码生成与识别
 - 书签有效性检查
 - 书签合并
