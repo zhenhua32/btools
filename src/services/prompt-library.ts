@@ -303,6 +303,160 @@ const subjectChildren: PromptCategory[] = [
 修剪整齐的胡须|neatly trimmed beard
 浓密胡须|full beard
 八字胡|mustache
+      `,
+    ),
+  ),
+  leaf(
+    'subject-beauty-aura',
+    '女性气质',
+    'Feminine Aesthetic',
+    'i-carbon-sparkles',
+    blockTerms(
+      'subject-beauty-aura',
+      `
+美丽|beautiful
+漂亮|pretty
+优雅|elegant
+端庄|graceful
+明艳|radiant
+清丽|delicately beautiful
+清冷|cool and refined
+甜美|sweet
+温柔|gentle
+知性|intellectual
+成熟|mature
+大方|poised
+自信|confident
+灵动|lively
+妩媚|charming
+性感|sensual
+飒爽|dashing
+英气|heroic
+高贵|noble
+典雅|classically elegant
+精致|refined
+自然|natural
+清新|fresh
+纯净|pure
+神秘|mysterious
+慵懒|effortlessly relaxed
+浪漫|romantic
+复古|vintage
+时尚|fashionable
+迷人|captivating
+`,
+    ),
+  ),
+  leaf(
+    'subject-beauty-face',
+    '女性面部细节',
+    'Feminine Facial Detail',
+    'i-carbon-face-wink',
+    blockTerms(
+      'subject-beauty-face',
+      `
+精致五官|delicate facial features
+立体五官|sculpted facial features
+柔和面部轮廓|soft facial contours
+流畅下颌线|smooth jawline
+小巧脸型|petite face
+饱满额头|full forehead
+自然眉形|natural eyebrows
+柳叶眉|willow-shaped eyebrows
+弯月眉|crescent-shaped eyebrows
+英气剑眉|bold straight eyebrows
+明亮双眸|bright eyes
+清澈眼神|clear gaze
+水润双眸|luminous eyes
+深邃双眸|deep-set expressive eyes
+含笑眼睛|smiling eyes
+长睫毛|long eyelashes
+卷翘睫毛|curled eyelashes
+高挺鼻梁|high nose bridge
+小巧鼻尖|delicate nose tip
+自然鼻型|natural nose shape
+饱满双唇|full lips
+柔和唇形|soft lip shape
+清晰唇峰|defined Cupid's bow
+自然唇色|natural lip color
+红润面颊|rosy cheeks
+细腻肤质|fine skin texture
+透亮肌肤|luminous skin
+健康光泽|healthy glow
+自然雀斑|natural freckles
+浅浅酒窝|subtle dimples
+`,
+    ),
+  ),
+  leaf(
+    'subject-beauty-makeup',
+    '女性妆容',
+    'Feminine Makeup',
+    'i-carbon-color-palette',
+    blockTerms(
+      'subject-beauty-makeup',
+      `
+素颜感|bare-faced look
+裸妆|nude makeup
+淡妆|light makeup
+自然妆容|natural makeup
+清透底妆|sheer complexion makeup
+水光底妆|dewy complexion makeup
+哑光底妆|matte complexion makeup
+柔雾妆效|soft-focus makeup
+暖色妆容|warm-toned makeup
+冷色妆容|cool-toned makeup
+大地色眼妆|earth-tone eye makeup
+玫瑰色眼妆|rose-toned eye makeup
+烟熏眼妆|smoky eye makeup
+细长眼线|fine elongated eyeliner
+上扬眼线|winged eyeliner
+自然睫毛|natural lashes
+根根分明睫毛|defined separated lashes
+豆沙唇色|muted rose lip color
+裸粉唇色|nude pink lip color
+珊瑚唇色|coral lip color
+浆果唇色|berry lip color
+正红唇色|classic red lip color
+哑光唇妆|matte lips
+水润唇妆|glossy lips
+自然腮红|natural blush
+蜜桃腮红|peach blush
+玫瑰腮红|rose blush
+轻微修容|subtle contouring
+自然高光|natural highlighter
+精致晚宴妆|refined evening makeup
+`,
+    ),
+  ),
+  leaf(
+    'subject-beauty-posture',
+    '女性体态',
+    'Feminine Posture',
+    'i-carbon-accessibility-alt',
+    blockTerms(
+      'subject-beauty-posture',
+      `
+高挑|tall
+修长比例|elongated proportions
+匀称身形|balanced figure
+纤细身形|slender figure
+健美身形|athletic figure
+自然曲线|natural curves
+挺拔体态|upright posture
+优雅体态|graceful posture
+从容姿态|composed posture
+轻盈姿态|light posture
+舒展肩颈|relaxed neck and shoulders
+平直肩线|straight shoulder line
+柔和肩线|soft shoulder line
+修长手臂|long arms
+纤细手指|slender fingers
+修长双腿|long legs
+自然站姿|natural standing pose
+优雅坐姿|elegant seated pose
+步态轻盈|light-footed gait
+步态从容|composed gait
 `,
     ),
   ),

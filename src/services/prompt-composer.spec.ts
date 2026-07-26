@@ -65,6 +65,10 @@ describe('prompt composer', () => {
     expect(terms.some((item) => item.zh === '女性')).toBe(true)
     expect(terms.some((item) => item.zh === '独立电影')).toBe(true)
     expect(terms.some((item) => item.zh === '导演')).toBe(true)
+    expect(terms.some((item) => item.zh === '美丽')).toBe(true)
+    expect(terms.some((item) => item.zh === '精致五官')).toBe(true)
+    expect(terms.some((item) => item.zh === '裸妆')).toBe(true)
+    expect(terms.some((item) => item.zh === '优雅体态')).toBe(true)
   })
 
   it('searches terms and category names across nested directories', () => {

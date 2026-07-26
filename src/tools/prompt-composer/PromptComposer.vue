@@ -37,6 +37,8 @@ const DEFAULT_ENABLED_CATEGORY_IDS = [
   'subject-gender',
   'subject-industry',
   'subject-profession',
+  'subject-beauty-aura',
+  'subject-beauty-face',
   'scene-nature',
   'scene-time',
   'action-motion',
