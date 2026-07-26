@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   composePrompt,
   createRandomSelection,
+  DEFAULT_PROMPT_CATEGORIES,
   filterPromptCategories,
   type PromptCategory,
 } from './prompt-composer'
@@ -27,6 +28,16 @@ const categories: PromptCategory[] = [
 ]
 
 describe('prompt composer', () => {
+  it('ships more than one thousand unique bilingual prompt groups', () => {
+    const terms = DEFAULT_PROMPT_CATEGORIES.flatMap((category) => category.terms)
+    const uniqueIds = new Set(terms.map((item) => item.id))
+
+    expect(DEFAULT_PROMPT_CATEGORIES.length).toBeGreaterThanOrEqual(10)
+    expect(terms.length).toBeGreaterThanOrEqual(1000)
+    expect(uniqueIds.size).toBe(terms.length)
+    expect(terms.every((item) => item.zh.trim() && item.en.trim())).toBe(true)
+  })
+
   it('searches Chinese and English terms and category names', () => {
     expect(filterPromptCategories(categories, '艺术家')[0].terms[0].id).toBe('artist')
     expect(filterPromptCategories(categories, 'misty')[0].category.id).toBe('scene')
@@ -50,4 +61,3 @@ describe('prompt composer', () => {
     )
   })
 })
-

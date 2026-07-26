@@ -1,3 +1,5 @@
+import { EXPANDED_PROMPT_CATEGORIES } from './prompt-library-expansion'
+
 export type PromptLanguage = 'bilingual' | 'zh' | 'en'
 
 export interface PromptTerm {
@@ -31,7 +33,7 @@ function term(id: string, zh: string, en: string): PromptTerm {
   return { id, zh, en }
 }
 
-export const DEFAULT_PROMPT_CATEGORIES: PromptCategory[] = [
+const BASE_PROMPT_CATEGORIES: PromptCategory[] = [
   {
     id: 'subject',
     nameZh: '主体身份与成年信息',
@@ -232,6 +234,21 @@ export const DEFAULT_PROMPT_CATEGORIES: PromptCategory[] = [
   },
 ]
 
+export const DEFAULT_PROMPT_CATEGORIES: PromptCategory[] =
+  EXPANDED_PROMPT_CATEGORIES.map((expandedCategory) => {
+    const baseCategory = BASE_PROMPT_CATEGORIES.find(
+      (category) => category.id === expandedCategory.id,
+    )
+
+    return {
+      ...expandedCategory,
+      terms: [
+        ...(baseCategory?.terms ?? []),
+        ...expandedCategory.terms,
+      ],
+    }
+  })
+
 export function clonePromptCategories(
   categories: PromptCategory[] = DEFAULT_PROMPT_CATEGORIES,
 ): PromptCategory[] {
@@ -304,4 +321,3 @@ export function composePrompt(
   if (language === 'en') return english
   return `中文：${chinese}\nEnglish: ${english}`
 }
-

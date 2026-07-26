@@ -13,7 +13,6 @@ import {
   clonePromptCategories,
   composePrompt,
   createRandomSelection,
-  DEFAULT_PROMPT_CATEGORIES,
   filterPromptCategories,
   type PromptCategory,
   type PromptLanguage,
@@ -21,11 +20,23 @@ import {
   type SelectedPrompt,
 } from '@/services/prompt-composer'
 
-const STORAGE_KEY = 'btools-prompt-composer-v1'
+const STORAGE_KEY = 'btools-prompt-composer-v2'
+const LEGACY_STORAGE_KEY = 'btools-prompt-composer-v1'
+const DEFAULT_ENABLED_CATEGORY_IDS = [
+  'subject',
+  'scene',
+  'action',
+  'wardrobe',
+  'camera',
+  'lighting',
+  'composition',
+  'style',
+  'constraints',
+]
 
 const categories = ref<PromptCategory[]>(clonePromptCategories())
-const enabledCategoryIds = ref(DEFAULT_PROMPT_CATEGORIES.map((category) => category.id))
-const activeCategoryId = ref('all')
+const enabledCategoryIds = ref([...DEFAULT_ENABLED_CATEGORY_IDS])
+const activeCategoryId = ref('subject')
 const searchQuery = ref('')
 const selected = ref<SelectedPrompt[]>([])
 const outputLanguage = ref<PromptLanguage>('bilingual')
@@ -49,7 +60,11 @@ const languageOptions: Array<{ label: string; value: PromptLanguage }> = [
 ]
 
 const filteredGroups = computed(() =>
-  filterPromptCategories(categories.value, searchQuery.value, activeCategoryId.value),
+  filterPromptCategories(
+    categories.value,
+    searchQuery.value,
+    searchQuery.value.trim() ? 'all' : activeCategoryId.value,
+  ),
 )
 
 const visibleTermCount = computed(() =>
@@ -92,7 +107,9 @@ watch(
 )
 
 onMounted(() => {
-  const saved = localStorage.getItem(STORAGE_KEY)
+  const currentSaved = localStorage.getItem(STORAGE_KEY)
+  const legacySaved = localStorage.getItem(LEGACY_STORAGE_KEY)
+  const saved = currentSaved ?? legacySaved
   if (!saved) return
 
   try {
@@ -101,14 +118,32 @@ onMounted(() => {
       enabledCategoryIds?: unknown
     }
 
-    if (isPromptCategoryArray(parsed.categories)) {
+    if (isPromptCategoryArray(parsed.categories) && currentSaved) {
       categories.value = clonePromptCategories(parsed.categories)
       const availableIds = new Set(categories.value.map((category) => category.id))
       enabledCategoryIds.value = Array.isArray(parsed.enabledCategoryIds)
         ? parsed.enabledCategoryIds.filter(
             (id): id is string => typeof id === 'string' && availableIds.has(id),
           )
-        : categories.value.map((category) => category.id)
+        : [...DEFAULT_ENABLED_CATEGORY_IDS]
+    } else if (isPromptCategoryArray(parsed.categories)) {
+      const customCategories = parsed.categories.filter(
+        (category) => category.custom || category.id.startsWith('custom-'),
+      )
+      categories.value = [
+        ...clonePromptCategories(),
+        ...clonePromptCategories(customCategories),
+      ]
+      const enabledLegacyIds = Array.isArray(parsed.enabledCategoryIds)
+        ? new Set(parsed.enabledCategoryIds.filter((id): id is string => typeof id === 'string'))
+        : new Set<string>()
+      enabledCategoryIds.value = [
+        ...DEFAULT_ENABLED_CATEGORY_IDS,
+        ...customCategories
+          .filter((category) => enabledLegacyIds.has(category.id))
+          .map((category) => category.id),
+      ]
+      localStorage.removeItem(LEGACY_STORAGE_KEY)
     }
   } catch {
     localStorage.removeItem(STORAGE_KEY)
@@ -291,8 +326,8 @@ function resetCategories() {
   if (!confirmed) return
 
   categories.value = clonePromptCategories()
-  enabledCategoryIds.value = categories.value.map((category) => category.id)
-  activeCategoryId.value = 'all'
+  enabledCategoryIds.value = [...DEFAULT_ENABLED_CATEGORY_IDS]
+  activeCategoryId.value = 'subject'
   selected.value = []
 }
 </script>
