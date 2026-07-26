@@ -7,31 +7,48 @@ import {
   NModal,
   NRadioButton,
   NRadioGroup,
+  NSelect,
   NSwitch,
 } from 'naive-ui'
 import {
   clonePromptCategories,
   composePrompt,
+  countAllPromptTerms,
   createRandomSelection,
   filterPromptCategories,
+  findPromptCategory,
+  flattenPromptCategories,
+  getPromptLeafCategories,
   type PromptCategory,
   type PromptLanguage,
   type PromptTerm,
   type SelectedPrompt,
 } from '@/services/prompt-composer'
+import CategoryTreeNode from './CategoryTreeNode.vue'
 
-const STORAGE_KEY = 'btools-prompt-composer-v2'
-const LEGACY_STORAGE_KEY = 'btools-prompt-composer-v1'
+const STORAGE_KEY = 'btools-prompt-composer-v3'
+const LEGACY_STORAGE_KEYS = [
+  'btools-prompt-composer-v2',
+  'btools-prompt-composer-v1',
+]
 const DEFAULT_ENABLED_CATEGORY_IDS = [
-  'subject',
-  'scene',
-  'action',
-  'wardrobe',
-  'camera',
-  'lighting',
-  'composition',
-  'style',
-  'constraints',
+  'subject-age',
+  'subject-adult',
+  'subject-gender',
+  'subject-industry',
+  'subject-profession',
+  'scene-nature',
+  'scene-time',
+  'action-motion',
+  'action-expression',
+  'wardrobe-garment',
+  'wardrobe-material',
+  'camera-shot',
+  'camera-focal-length',
+  'lighting-source',
+  'composition-structure',
+  'style-medium',
+  'constraints-negative',
 ]
 
 const categories = ref<PromptCategory[]>(clonePromptCategories())
@@ -51,6 +68,7 @@ const categoryForm = reactive({
   nameZh: '',
   nameEn: '',
   termsText: '',
+  parentId: 'root',
 })
 
 const languageOptions: Array<{ label: string; value: PromptLanguage }> = [
@@ -72,17 +90,25 @@ const visibleTermCount = computed(() =>
 )
 
 const totalTermCount = computed(() =>
-  categories.value.reduce((total, category) => total + category.terms.length, 0),
+  countAllPromptTerms(categories.value),
 )
 
 const selectedTermIds = computed(() => new Set(selected.value.map((item) => item.term.id)))
 
 const enabledCount = computed(() =>
-  categories.value.filter(
+  getPromptLeafCategories(categories.value).filter(
     (category) =>
       enabledCategoryIds.value.includes(category.id) && category.terms.length > 0,
   ).length,
 )
+
+const rootCategoryOptions = computed(() => [
+  { label: '根目录（作为大类别）', value: 'root' },
+  ...categories.value.map((category) => ({
+    label: `${category.nameZh} / ${category.nameEn}`,
+    value: category.id,
+  })),
+])
 
 watch(
   [selected, outputLanguage],
@@ -108,7 +134,8 @@ watch(
 
 onMounted(() => {
   const currentSaved = localStorage.getItem(STORAGE_KEY)
-  const legacySaved = localStorage.getItem(LEGACY_STORAGE_KEY)
+  const legacyKey = LEGACY_STORAGE_KEYS.find((key) => localStorage.getItem(key))
+  const legacySaved = legacyKey ? localStorage.getItem(legacyKey) : null
   const saved = currentSaved ?? legacySaved
   if (!saved) return
 
@@ -120,14 +147,16 @@ onMounted(() => {
 
     if (isPromptCategoryArray(parsed.categories) && currentSaved) {
       categories.value = clonePromptCategories(parsed.categories)
-      const availableIds = new Set(categories.value.map((category) => category.id))
+      const availableIds = new Set(
+        flattenPromptCategories(categories.value).map((category) => category.id),
+      )
       enabledCategoryIds.value = Array.isArray(parsed.enabledCategoryIds)
         ? parsed.enabledCategoryIds.filter(
             (id): id is string => typeof id === 'string' && availableIds.has(id),
           )
         : [...DEFAULT_ENABLED_CATEGORY_IDS]
     } else if (isPromptCategoryArray(parsed.categories)) {
-      const customCategories = parsed.categories.filter(
+      const customCategories = flattenPromptCategories(parsed.categories).filter(
         (category) => category.custom || category.id.startsWith('custom-'),
       )
       categories.value = [
@@ -143,7 +172,7 @@ onMounted(() => {
           .filter((category) => enabledLegacyIds.has(category.id))
           .map((category) => category.id),
       ]
-      localStorage.removeItem(LEGACY_STORAGE_KEY)
+      for (const key of LEGACY_STORAGE_KEYS) localStorage.removeItem(key)
     }
   } catch {
     localStorage.removeItem(STORAGE_KEY)
@@ -169,6 +198,10 @@ function isPromptCategoryArray(value: unknown): value is PromptCategory[] {
             typeof (item as PromptTerm).id === 'string' &&
             typeof (item as PromptTerm).zh === 'string' &&
             typeof (item as PromptTerm).en === 'string',
+        ) &&
+        (
+          category.children === undefined ||
+          isPromptCategoryArray(category.children)
         ),
     )
   )
@@ -232,12 +265,13 @@ function setCategoryEnabled(categoryId: string, enabled: boolean) {
   }
 }
 
-function startAddCategory() {
+function startAddCategory(parentId = 'root') {
   editorMode.value = 'add'
   editingCategoryId.value = ''
   categoryForm.nameZh = ''
   categoryForm.nameEn = ''
   categoryForm.termsText = ''
+  categoryForm.parentId = parentId
   showCategoryEditor.value = true
 }
 
@@ -276,7 +310,7 @@ function saveCategory() {
   if (!nameZh) return
 
   if (editorMode.value === 'edit') {
-    const category = categories.value.find((item) => item.id === editingCategoryId.value)
+    const category = findPromptCategory(categories.value, editingCategoryId.value)
     if (!category) return
 
     category.nameZh = nameZh
@@ -287,15 +321,27 @@ function saveCategory() {
       .filter((entry) => entry.categoryId !== category.id)
   } else {
     const categoryId = `custom-${Date.now()}`
-    categories.value.push({
+    const newCategory: PromptCategory = {
       id: categoryId,
       nameZh,
       nameEn,
       icon: 'i-carbon-bookmark-add',
       custom: true,
       terms: parseTerms(categoryForm.termsText, categoryId),
-    })
-    enabledCategoryIds.value.push(categoryId)
+    }
+    const parent =
+      categoryForm.parentId === 'root'
+        ? undefined
+        : findPromptCategory(categories.value, categoryForm.parentId)
+
+    if (parent) {
+      parent.children ??= []
+      parent.children.push(newCategory)
+    } else {
+      categories.value.push(newCategory)
+    }
+
+    if (newCategory.terms.length > 0) enabledCategoryIds.value.push(categoryId)
   }
 
   showCategoryEditor.value = false
@@ -305,20 +351,27 @@ function deleteCategory(category: PromptCategory) {
   const confirmed = window.confirm(`确定删除“${category.nameZh}”分类吗？可通过“恢复内置分类”重置。`)
   if (!confirmed) return
 
-  categories.value = categories.value.filter((item) => item.id !== category.id)
-  enabledCategoryIds.value = enabledCategoryIds.value.filter((id) => id !== category.id)
-  selected.value = selected.value.filter((entry) => entry.categoryId !== category.id)
-  if (activeCategoryId.value === category.id) activeCategoryId.value = 'all'
-}
+  const removedIds = new Set(
+    flattenPromptCategories([category]).map((item) => item.id),
+  )
 
-function moveCategory(index: number, offset: -1 | 1) {
-  const nextIndex = index + offset
-  if (nextIndex < 0 || nextIndex >= categories.value.length) return
+  function removeFromTree(items: PromptCategory[]): PromptCategory[] {
+    return items
+      .filter((item) => item.id !== category.id)
+      .map((item) => ({
+        ...item,
+        children: item.children ? removeFromTree(item.children) : undefined,
+      }))
+  }
 
-  const reordered = [...categories.value]
-  const [category] = reordered.splice(index, 1)
-  reordered.splice(nextIndex, 0, category)
-  categories.value = reordered
+  categories.value = removeFromTree(categories.value)
+  enabledCategoryIds.value = enabledCategoryIds.value.filter(
+    (id) => !removedIds.has(id),
+  )
+  selected.value = selected.value.filter(
+    (entry) => !removedIds.has(entry.categoryId),
+  )
+  if (removedIds.has(activeCategoryId.value)) activeCategoryId.value = 'all'
 }
 
 function resetCategories() {
@@ -341,7 +394,7 @@ function resetCategories() {
           PROMPT STUDIO
         </div>
         <h2>把灵感，组合成完整提示词</h2>
-        <p>浏览 {{ totalTermCount }} 条中英文词条，按分类自由点选，或让组合器为你制造一次意外。</p>
+        <p>浏览 {{ totalTermCount }} 条中英文原子词，按目录自由点选，再组合成完整 Prompt。</p>
       </div>
       <div class="hero-actions">
         <NButton secondary @click="showCategoryManager = true">
@@ -394,20 +447,13 @@ function resetCategories() {
               </span>
               <b>{{ totalTermCount }}</b>
             </button>
-            <button
+            <CategoryTreeNode
               v-for="category in categories"
               :key="category.id"
-              type="button"
-              :class="['category-button', { active: activeCategoryId === category.id }]"
-              @click="activeCategoryId = category.id"
-            >
-              <span :class="['category-icon', category.icon]" />
-              <span>
-                <strong>{{ category.nameZh }}</strong>
-                <small>{{ category.nameEn }}</small>
-              </span>
-              <b>{{ category.terms.length }}</b>
-            </button>
+              :category="category"
+              :active-id="activeCategoryId"
+              @select="activeCategoryId = $event"
+            />
           </nav>
 
           <div class="term-browser">
@@ -419,8 +465,8 @@ function resetCategories() {
               >
                 <div class="term-group-title">
                   <span :class="group.category.icon" />
-                  <strong>{{ group.category.nameZh }}</strong>
-                  <span>{{ group.category.nameEn }}</span>
+                  <strong>{{ group.pathZh }}</strong>
+                  <span>{{ group.pathEn }}</span>
                 </div>
                 <div class="term-grid">
                   <button
@@ -451,14 +497,14 @@ function resetCategories() {
             <span class="step-label light">02 · 提示词组合</span>
             <h3>组合结果</h3>
           </div>
-          <span class="enabled-count">{{ enabledCount }} 个分类已启用</span>
+          <span class="enabled-count">{{ enabledCount }} 个小类别已启用</span>
         </div>
 
         <div class="random-callout">
           <span class="random-icon i-carbon-shuffle" />
           <div>
             <strong>不知道从哪里开始？</strong>
-            <p>每个启用分类随机抽取一项，可在分类管理中自由增减。</p>
+            <p>每个启用的小类别随机抽取一个原子词，可在分类管理中自由增减。</p>
           </div>
           <button
             type="button"
@@ -551,62 +597,86 @@ function resetCategories() {
     <NModal
       v-model:show="showCategoryManager"
       preset="card"
-      title="组合分类管理"
+      title="目录与随机分类管理"
       class="category-modal"
       :style="{ width: 'min(720px, calc(100vw - 32px))' }"
     >
       <div class="manager-intro">
-        <p>开关决定随机组合时是否使用该分类。拖动顺序由上下按钮调整，也会影响最终 Prompt 的排列。</p>
-        <NButton type="primary" ghost size="small" @click="startAddCategory">
+        <p>目录用于组织词库；只有包含词条的小类别会参与随机组合。可为任意大类别增加子目录。</p>
+        <NButton type="primary" ghost size="small" @click="startAddCategory('root')">
           <template #icon><span class="i-carbon-add" /></template>
-          新增分类
+          新增大类别
         </NButton>
       </div>
 
       <div class="manager-list">
-        <div
-          v-for="(category, index) in categories"
-          :key="category.id"
-          class="manager-row"
-        >
-          <NSwitch
-            :value="isCategoryEnabled(category.id)"
-            :disabled="category.terms.length === 0"
-            @update:value="setCategoryEnabled(category.id, $event)"
-          />
-          <span :class="['manager-icon', category.icon]" />
-          <div class="manager-name">
-            <strong>{{ category.nameZh }}</strong>
-            <small>{{ category.nameEn }} · {{ category.terms.length }} 条</small>
+        <div v-for="category in categories" :key="category.id" class="manager-group">
+          <div class="manager-row manager-root-row">
+            <NSwitch
+              v-if="category.terms.length > 0"
+              :value="isCategoryEnabled(category.id)"
+              @update:value="setCategoryEnabled(category.id, $event)"
+            />
+            <span v-else class="manager-switch-placeholder" />
+            <span class="manager-icon i-carbon-folder" />
+            <div class="manager-name">
+              <strong>{{ category.nameZh }}</strong>
+              <small>
+                {{ category.nameEn }} ·
+                {{ countAllPromptTerms([category]) }} 条原子词
+              </small>
+            </div>
+            <div class="manager-buttons">
+              <button
+                type="button"
+                aria-label="新增子类别"
+                title="新增子类别"
+                @click="startAddCategory(category.id)"
+              >
+                <span class="i-carbon-add" />
+              </button>
+              <button type="button" aria-label="编辑分类" @click="startEditCategory(category)">
+                <span class="i-carbon-edit" />
+              </button>
+              <button
+                type="button"
+                class="danger"
+                aria-label="删除分类"
+                @click="deleteCategory(category)"
+              >
+                <span class="i-carbon-trash-can" />
+              </button>
+            </div>
           </div>
-          <div class="manager-buttons">
-            <button
-              type="button"
-              :disabled="index === 0"
-              aria-label="上移分类"
-              @click="moveCategory(index, -1)"
-            >
-              <span class="i-carbon-arrow-up" />
-            </button>
-            <button
-              type="button"
-              :disabled="index === categories.length - 1"
-              aria-label="下移分类"
-              @click="moveCategory(index, 1)"
-            >
-              <span class="i-carbon-arrow-down" />
-            </button>
-            <button type="button" aria-label="编辑分类" @click="startEditCategory(category)">
-              <span class="i-carbon-edit" />
-            </button>
-            <button
-              type="button"
-              class="danger"
-              aria-label="删除分类"
-              @click="deleteCategory(category)"
-            >
-              <span class="i-carbon-trash-can" />
-            </button>
+
+          <div
+            v-for="child in flattenPromptCategories(category.children ?? [])"
+            :key="child.id"
+            class="manager-row manager-child-row"
+          >
+            <NSwitch
+              :value="isCategoryEnabled(child.id)"
+              :disabled="child.terms.length === 0"
+              @update:value="setCategoryEnabled(child.id, $event)"
+            />
+            <span :class="['manager-icon', child.icon]" />
+            <div class="manager-name">
+              <strong>{{ child.nameZh }}</strong>
+              <small>{{ child.nameEn }} · {{ child.terms.length }} 条</small>
+            </div>
+            <div class="manager-buttons">
+              <button type="button" aria-label="编辑分类" @click="startEditCategory(child)">
+                <span class="i-carbon-edit" />
+              </button>
+              <button
+                type="button"
+                class="danger"
+                aria-label="删除分类"
+                @click="deleteCategory(child)"
+              >
+                <span class="i-carbon-trash-can" />
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -626,9 +696,16 @@ function resetCategories() {
       :style="{ width: 'min(620px, calc(100vw - 32px))' }"
     >
       <div class="editor-form">
+        <label v-if="editorMode === 'add'">
+          <span>上级目录</span>
+          <NSelect
+            v-model:value="categoryForm.parentId"
+            :options="rootCategoryOptions"
+          />
+        </label>
         <label>
           <span>中文分类名</span>
-          <NInput v-model:value="categoryForm.nameZh" placeholder="例如：天气与氛围" />
+          <NInput v-model:value="categoryForm.nameZh" placeholder="例如：天气状态" />
         </label>
         <label>
           <span>英文分类名</span>
@@ -639,10 +716,10 @@ function resetCategories() {
           <NInput
             v-model:value="categoryForm.termsText"
             type="textarea"
-            placeholder="每行一条，使用“中文 | English”格式&#10;细雨与薄雾 | light rain and mist&#10;晴朗的蓝天 | clear blue sky"
+            placeholder="每行一个原子词，使用“中文 | English”格式&#10;细雨 | drizzle&#10;薄雾 | mist"
             :autosize="{ minRows: 8, maxRows: 16 }"
           />
-          <small>每行一条；没有英文时可只填写一段文字。</small>
+          <small>不要预先组合多个维度；例如年龄、成年信息、性别和职业应分别放入不同子类别。</small>
         </label>
       </div>
 
@@ -799,7 +876,7 @@ function resetCategories() {
 
 .library-body {
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
+  grid-template-columns: 235px minmax(0, 1fr);
   min-height: 560px;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -812,6 +889,10 @@ function resetCategories() {
   padding: 8px;
   border-right: 1px solid var(--line);
   background: #faf9fc;
+}
+
+.category-nav :deep(.tree-node) {
+  width: 100%;
 }
 
 .category-button {
@@ -904,7 +985,7 @@ function resetCategories() {
 
 .term-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(185px, 1fr));
   gap: 8px;
 }
 
@@ -1187,6 +1268,10 @@ button:disabled {
   border-radius: 12px;
 }
 
+.manager-group + .manager-group {
+  border-top: 1px solid var(--line);
+}
+
 .manager-row {
   display: grid;
   grid-template-columns: auto 24px minmax(0, 1fr) auto;
@@ -1197,6 +1282,19 @@ button:disabled {
 
 .manager-row + .manager-row {
   border-top: 1px solid var(--line);
+}
+
+.manager-root-row {
+  background: #faf9fc;
+}
+
+.manager-child-row {
+  padding-left: 36px;
+}
+
+.manager-switch-placeholder {
+  width: 28px;
+  height: 1px;
 }
 
 .manager-icon {
@@ -1291,16 +1389,16 @@ button:disabled {
   }
 
   .category-nav {
-    display: flex;
-    max-height: none;
-    overflow-x: auto;
+    display: block;
+    max-height: 280px;
+    overflow-x: hidden;
+    overflow-y: auto;
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
 
   .category-button {
-    width: 155px;
-    flex: 0 0 auto;
+    width: 100%;
   }
 
   .term-browser {

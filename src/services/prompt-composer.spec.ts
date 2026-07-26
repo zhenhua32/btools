@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   composePrompt,
+  countAllPromptTerms,
   createRandomSelection,
   DEFAULT_PROMPT_CATEGORIES,
   filterPromptCategories,
+  flattenPromptCategories,
+  getPromptLeafCategories,
   type PromptCategory,
 } from './prompt-composer'
 
@@ -13,9 +16,28 @@ const categories: PromptCategory[] = [
     nameZh: '主体',
     nameEn: 'Subject',
     icon: '',
-    terms: [
-      { id: 'adult', zh: '成年摄影师', en: 'an adult photographer' },
-      { id: 'artist', zh: '成年艺术家', en: 'an adult artist' },
+    terms: [],
+    children: [
+      {
+        id: 'age',
+        nameZh: '年龄',
+        nameEn: 'Age',
+        icon: '',
+        terms: [
+          { id: 'age-25', zh: '25岁', en: '25 years old' },
+          { id: 'age-30', zh: '30岁', en: '30 years old' },
+        ],
+      },
+      {
+        id: 'profession',
+        nameZh: '职业',
+        nameEn: 'Profession',
+        icon: '',
+        terms: [
+          { id: 'director', zh: '导演', en: 'director' },
+          { id: 'artist', zh: '艺术家', en: 'artist' },
+        ],
+      },
     ],
   },
   {
@@ -28,36 +50,58 @@ const categories: PromptCategory[] = [
 ]
 
 describe('prompt composer', () => {
-  it('ships more than one thousand unique bilingual prompt groups', () => {
-    const terms = DEFAULT_PROMPT_CATEGORIES.flatMap((category) => category.terms)
+  it('ships more than one thousand unique bilingual atomic terms in a category tree', () => {
+    const allCategories = flattenPromptCategories(DEFAULT_PROMPT_CATEGORIES)
+    const terms = allCategories.flatMap((category) => category.terms)
     const uniqueIds = new Set(terms.map((item) => item.id))
 
     expect(DEFAULT_PROMPT_CATEGORIES.length).toBeGreaterThanOrEqual(10)
+    expect(DEFAULT_PROMPT_CATEGORIES.every((category) => category.children?.length)).toBe(true)
     expect(terms.length).toBeGreaterThanOrEqual(1000)
     expect(uniqueIds.size).toBe(terms.length)
     expect(terms.every((item) => item.zh.trim() && item.en.trim())).toBe(true)
+    expect(terms.some((item) => item.zh === '25岁')).toBe(true)
+    expect(terms.some((item) => item.zh === '成年')).toBe(true)
+    expect(terms.some((item) => item.zh === '女性')).toBe(true)
+    expect(terms.some((item) => item.zh === '独立电影')).toBe(true)
+    expect(terms.some((item) => item.zh === '导演')).toBe(true)
   })
 
-  it('searches Chinese and English terms and category names', () => {
+  it('searches terms and category names across nested directories', () => {
     expect(filterPromptCategories(categories, '艺术家')[0].terms[0].id).toBe('artist')
     expect(filterPromptCategories(categories, 'misty')[0].category.id).toBe('scene')
-    expect(filterPromptCategories(categories, 'Subject')[0].terms).toHaveLength(2)
+    expect(filterPromptCategories(categories, 'Subject')).toHaveLength(2)
+    expect(filterPromptCategories(categories, '', 'subject')).toHaveLength(2)
+    expect(countAllPromptTerms(categories)).toBe(5)
   })
 
-  it('selects one term from every enabled category in category order', () => {
-    const selection = createRandomSelection(categories, ['scene', 'subject'], () => 0.99)
+  it('selects one atomic term from every enabled leaf category', () => {
+    const selection = createRandomSelection(
+      categories,
+      ['profession', 'age', 'scene'],
+      () => 0.99,
+    )
 
-    expect(selection.map((item) => item.term.id)).toEqual(['artist', 'forest'])
+    expect(getPromptLeafCategories(categories).map((item) => item.id)).toEqual([
+      'age',
+      'profession',
+      'scene',
+    ])
+    expect(selection.map((item) => item.term.id)).toEqual([
+      'age-30',
+      'artist',
+      'forest',
+    ])
   })
 
   it('composes Chinese, English, and bilingual prompts', () => {
-    const selection = createRandomSelection(categories, ['subject', 'scene'], () => 0)
+    const selection = createRandomSelection(categories, ['age', 'profession', 'scene'], () => 0)
 
-    expect(composePrompt(selection, 'zh')).toBe('成年摄影师，雾中森林。')
-    expect(composePrompt(selection, 'en')).toBe('an adult photographer, a misty forest.')
-    expect(composePrompt(selection, 'bilingual')).toContain('中文：成年摄影师，雾中森林。')
+    expect(composePrompt(selection, 'zh')).toBe('25岁，导演，雾中森林。')
+    expect(composePrompt(selection, 'en')).toBe('25 years old, director, a misty forest.')
+    expect(composePrompt(selection, 'bilingual')).toContain('中文：25岁，导演，雾中森林。')
     expect(composePrompt(selection, 'bilingual')).toContain(
-      'English: an adult photographer, a misty forest.',
+      'English: 25 years old, director, a misty forest.',
     )
   })
 })
