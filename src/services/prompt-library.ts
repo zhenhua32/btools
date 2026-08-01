@@ -61,25 +61,6 @@ const subjectChildren: PromptCategory[] = [
     ),
   ),
   leaf(
-    'subject-adult',
-    '成年信息',
-    'Adult Status',
-    'i-carbon-user-certification',
-    blockTerms(
-      'subject-adult',
-      `
-成年|adult
-法定成年人|legal adult
-年轻成年人|young adult
-成熟成年人|mature adult
-中年成年人|middle-aged adult
-年长成年人|older adult
-老年成年人|elderly adult
-明确为成年人|explicitly an adult
-`,
-    ),
-  ),
-  leaf(
     'subject-gender',
     '性别呈现',
     'Gender Presentation',
@@ -220,18 +201,18 @@ const subjectChildren: PromptCategory[] = [
       'subject-relationship',
       `
 独自一人|solo
-成年情侣|adult couple
-成年夫妻|married adult couple
-成年兄妹|adult siblings
-成年姐妹|adult sisters
-成年兄弟|adult brothers
+情侣|couple
+夫妻|married couple
+兄妹|brother and sister
+姐妹|sisters
+兄弟|brothers
 两位朋友|two friends
 三人小组|group of three
 工作伙伴|coworkers
 创作搭档|creative partners
-导师与成年学生|mentor and adult student
-医生与成年患者|doctor and adult patient
-摄影师与成年模特|photographer and adult model
+导师与学生|mentor and student
+医生与患者|doctor and patient
+摄影师与模特|photographer and model
 乐队成员|band members
 探险队成员|expedition members
 `,
@@ -930,6 +911,309 @@ A字裙|A-line skirt
 凉鞋|sandals
 芭蕾平底鞋|ballet flats
 赤脚|barefoot
+      `,
+    ),
+  ),
+  leaf(
+    'wardrobe-female-tops',
+    '女士上装',
+    'Women’s Tops',
+    'i-carbon-shirt',
+    blockTerms(
+      'wardrobe-female-tops',
+      `
+泡泡袖衬衫|puff-sleeve blouse
+荷叶边衬衫|ruffled blouse
+蝴蝶结衬衫|bow-neck blouse
+系带衬衫|tie-front blouse
+裹身上衣|wrap top
+一字肩上衣|off-shoulder top
+露肩上衣|cold-shoulder top
+方领上衣|square-neck top
+心形领上衣|sweetheart-neck top
+挂脖上衣|halter top
+无袖真丝上衣|sleeveless silk top
+蕾丝上衣|lace top
+薄纱上衣|sheer chiffon top
+刺绣上衣|embroidered top
+胸衣式上衣|corset-style top
+短款针织衫|cropped knit top
+修身针织衫|fitted knit top
+短款针织开衫|cropped cardigan
+珍珠纽扣开衫|pearl-button cardigan
+法式针织开衫|French-style cardigan
+罗纹背心|ribbed tank top
+真丝吊带上衣|silk camisole
+缎面吊带上衣|satin camisole
+收腰马甲|fitted waistcoat
+西装马甲|tailored suit vest
+荷叶边短上衣|ruffled crop top
+灯笼袖上衣|lantern-sleeve top
+喇叭袖上衣|bell-sleeve top
+瑜伽上衣|yoga top
+运动背心|athletic tank top
+`,
+    ),
+  ),
+  leaf(
+    'wardrobe-female-dresses',
+    '女士裙装',
+    'Women’s Dresses',
+    'i-carbon-fashion',
+    blockTerms(
+      'wardrobe-female-dresses',
+      `
+小黑裙|little black dress
+裹身裙|wrap dress
+茶歇裙|tea dress
+衬衫裙|shirt dress
+针织连衣裙|knitted dress
+吊带裙|slip dress
+背心裙|pinafore dress
+抹胸裙|strapless dress
+挂脖裙|halter-neck dress
+一字肩连衣裙|off-shoulder dress
+方领连衣裙|square-neck dress
+泡泡袖连衣裙|puff-sleeve dress
+灯笼袖连衣裙|lantern-sleeve dress
+收腰连衣裙|cinched-waist dress
+高腰连衣裙|empire-waist dress
+A字连衣裙|A-line dress
+直筒连衣裙|shift dress
+修身连衣裙|body-skimming dress
+铅笔连衣裙|pencil dress
+伞摆连衣裙|fit-and-flare dress
+不对称连衣裙|asymmetrical dress
+高低摆连衣裙|high-low dress
+开衩连衣裙|slit dress
+百褶连衣裙|pleated dress
+荷叶边连衣裙|ruffled dress
+蕾丝连衣裙|lace dress
+雪纺连衣裙|chiffon dress
+丝绸连衣裙|silk dress
+缎面连衣裙|satin dress
+天鹅绒连衣裙|velvet dress
+印花连衣裙|printed dress
+波点连衣裙|polka-dot dress
+碎花连衣裙|floral dress
+牛仔连衣裙|denim dress
+亚麻连衣裙|linen dress
+`,
+    ),
+  ),
+  leaf(
+    'wardrobe-female-bottoms',
+    '女士下装',
+    'Women’s Bottoms',
+    'i-carbon-row',
+    blockTerms(
+      'wardrobe-female-bottoms',
+      `
+高腰直筒裤|high-waisted straight trousers
+高腰阔腿裤|high-waisted wide-leg trousers
+高腰锥形裤|high-waisted tapered trousers
+西装长裤|tailored trousers
+九分裤|cropped trousers
+喇叭裤|flared trousers
+纸袋腰长裤|paperbag-waist trousers
+真丝长裤|silk trousers
+针织长裤|knitted trousers
+皮革长裤|leather trousers
+高腰牛仔裤|high-waisted jeans
+直筒牛仔裤|straight-leg jeans
+阔腿牛仔裤|wide-leg jeans
+牛仔短裤|denim shorts
+西装短裤|tailored shorts
+高腰短裤|high-waisted shorts
+迷你裙|mini skirt
+中长裙|midi skirt
+及踝长裙|ankle-length skirt
+鱼尾裙|mermaid skirt
+伞裙|circle skirt
+裹身裙|wrap skirt
+开衩长裙|slit maxi skirt
+不对称半身裙|asymmetrical skirt
+缎面半身裙|satin skirt
+`,
+    ),
+  ),
+  leaf(
+    'wardrobe-female-outerwear',
+    '女士外套',
+    'Women’s Outerwear',
+    'i-carbon-umbrella',
+    blockTerms(
+      'wardrobe-female-outerwear',
+      `
+收腰西装|fitted blazer
+廓形西装|oversized blazer
+短款西装|cropped blazer
+双排扣女式西装|women’s double-breasted blazer
+无领粗花呢外套|collarless tweed jacket
+短款粗花呢外套|cropped tweed jacket
+短款皮夹克|cropped leather jacket
+麂皮短外套|suede jacket
+修身牛仔夹克|fitted denim jacket
+短款飞行夹克|cropped bomber jacket
+束腰风衣|belted trench coat
+短款风衣|short trench coat
+长款羊毛大衣|long wool coat
+浴袍式大衣|robe coat
+茧型大衣|cocoon coat
+斗篷大衣|cape coat
+披肩外套|shawl coat
+人造皮草外套|faux-fur coat
+羽绒服|down jacket
+绗缝外套|quilted jacket
+针织披肩|knitted wrap
+羊绒披肩|cashmere wrap
+长款针织开衫|long cardigan
+短款针织外套|cropped knit jacket
+机车夹克|biker jacket
+`,
+    ),
+  ),
+  leaf(
+    'wardrobe-female-formal',
+    '女士礼服',
+    'Women’s Formalwear',
+    'i-carbon-star-filled',
+    blockTerms(
+      'wardrobe-female-formal',
+      `
+鸡尾酒礼服|cocktail dress
+及地晚礼服|floor-length evening gown
+鱼尾晚礼服|mermaid evening gown
+A字晚礼服|A-line evening gown
+舞会礼服|ball gown
+帝国腰线礼服|empire-waist gown
+露肩礼服|off-shoulder gown
+抹胸礼服|strapless gown
+单肩礼服|one-shoulder gown
+挂脖礼服|halter-neck gown
+深V领礼服|plunging V-neck gown
+高领礼服|high-neck gown
+长袖礼服|long-sleeve gown
+披风式礼服|cape gown
+开衩礼服|slit gown
+露背礼服|open-back gown
+蕾丝礼服|lace gown
+薄纱礼服|tulle gown
+丝绸礼服|silk gown
+缎面礼服|satin gown
+天鹅绒礼服|velvet gown
+亮片礼服|sequined gown
+珠饰礼服|beaded gown
+刺绣礼服|embroidered gown
+结构感礼服|architectural gown
+`,
+    ),
+  ),
+  leaf(
+    'wardrobe-neckline',
+    '领型',
+    'Neckline',
+    'i-carbon-crop-growth',
+    blockTerms(
+      'wardrobe-neckline',
+      `
+圆领|crew neckline
+高圆领|high crew neckline
+V领|V neckline
+深V领|plunging V neckline
+方领|square neckline
+一字领|boat neckline
+露肩领|off-shoulder neckline
+心形领|sweetheart neckline
+抹胸领|strapless neckline
+挂脖领|halter neckline
+高领|high neckline
+堆堆领|cowl neckline
+彼得潘领|Peter Pan collar
+娃娃领|doll collar
+衬衫领|shirt collar
+立领|stand collar
+海军领|sailor collar
+西装领|notched lapel
+青果领|shawl collar
+荷叶边领|ruffled collar
+系带领|tie neckline
+不对称领|asymmetrical neckline
+单肩领|one-shoulder neckline
+钥匙孔领|keyhole neckline
+水滴领|teardrop neckline
+`,
+    ),
+  ),
+  leaf(
+    'wardrobe-sleeve',
+    '袖型',
+    'Sleeve',
+    'i-carbon-fit-to-screen',
+    blockTerms(
+      'wardrobe-sleeve',
+      `
+无袖|sleeveless
+短袖|short sleeves
+五分袖|elbow-length sleeves
+七分袖|three-quarter sleeves
+长袖|long sleeves
+贴身长袖|fitted long sleeves
+宽松长袖|relaxed long sleeves
+泡泡袖|puff sleeves
+灯笼袖|lantern sleeves
+羊腿袖|leg-of-mutton sleeves
+喇叭袖|bell sleeves
+花瓣袖|petal sleeves
+飞飞袖|flutter sleeves
+蝙蝠袖|batwing sleeves
+插肩袖|raglan sleeves
+落肩袖|drop-shoulder sleeves
+荷叶边袖|ruffled sleeves
+开衩袖|slit sleeves
+透明薄纱袖|sheer tulle sleeves
+蕾丝长袖|long lace sleeves
+`,
+    ),
+  ),
+  leaf(
+    'wardrobe-female-detail',
+    '女士服装细节',
+    'Women’s Garment Detail',
+    'i-carbon-settings-adjust',
+    blockTerms(
+      'wardrobe-female-detail',
+      `
+高腰线|high waistline
+低腰线|low waistline
+帝国腰线|empire waistline
+收腰剪裁|cinched-waist tailoring
+宽松剪裁|relaxed tailoring
+修身剪裁|fitted tailoring
+不对称剪裁|asymmetrical cut
+露背设计|open-back design
+镂空设计|cutout design
+侧开衩|side slit
+前开衩|front slit
+高开衩|high slit
+层叠裙摆|layered hem
+荷叶边装饰|ruffle detailing
+褶皱设计|ruched detailing
+抽褶设计|gathered detailing
+立体打褶|structured pleating
+束带设计|belted design
+系带设计|tie detailing
+蝴蝶结装饰|bow detailing
+珍珠纽扣|pearl buttons
+包布纽扣|fabric-covered buttons
+金属纽扣|metal buttons
+精细刺绣|fine embroidery
+珠饰细节|beaded detailing
+亮片装饰|sequin detailing
+蕾丝拼接|lace panels
+薄纱拼接|tulle panels
+撞色滚边|contrast piping
+手工缝线|hand-finished stitching
 `,
     ),
   ),

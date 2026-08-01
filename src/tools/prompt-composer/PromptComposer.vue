@@ -26,14 +26,14 @@ import {
 } from '@/services/prompt-composer'
 import CategoryTreeNode from './CategoryTreeNode.vue'
 
-const STORAGE_KEY = 'btools-prompt-composer-v3'
+const STORAGE_KEY = 'btools-prompt-composer-v4'
 const LEGACY_STORAGE_KEYS = [
+  'btools-prompt-composer-v3',
   'btools-prompt-composer-v2',
   'btools-prompt-composer-v1',
 ]
 const DEFAULT_ENABLED_CATEGORY_IDS = [
   'subject-age',
-  'subject-adult',
   'subject-gender',
   'subject-industry',
   'subject-profession',
@@ -721,7 +721,7 @@ function resetCategories() {
             placeholder="每行一个原子词，使用“中文 | English”格式&#10;细雨 | drizzle&#10;薄雾 | mist"
             :autosize="{ minRows: 8, maxRows: 16 }"
           />
-          <small>不要预先组合多个维度；例如年龄、成年信息、性别和职业应分别放入不同子类别。</small>
+          <small>不要预先组合多个维度；例如年龄、性别、行业和职业应分别放入不同子类别。</small>
         </label>
       </div>
 
