@@ -5,6 +5,23 @@ export type TranslationStrategy = 'whole-document' | 'paragraph-by-paragraph'
 export type AiChatRole = 'system' | 'user' | 'assistant'
 export type PageTranslateMode = 'page' | 'selection'
 
+export interface AiChatTextContentPart {
+  type: 'text'
+  text: string
+}
+
+export interface AiChatImageUrlContentPart {
+  type: 'image_url'
+  image_url: {
+    url: string
+    detail?: 'auto' | 'low' | 'high'
+  }
+}
+
+export type AiChatContent =
+  | string
+  | Array<AiChatTextContentPart | AiChatImageUrlContentPart>
+
 export interface AiSettings {
   baseUrl: string
   apiKey: string
@@ -23,7 +40,7 @@ export interface AiSettings {
 
 export interface AiChatMessage {
   role: AiChatRole
-  content: string
+  content: AiChatContent
 }
 
 export interface AiProxyRequestPayload {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onActivated, onMounted, ref } from 'vue'
+import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NAlert,
@@ -21,10 +21,22 @@ import {
 import {
   PROMPT_OPTIMIZATION_MODE_DESCRIPTIONS,
   PROMPT_OPTIMIZATION_MODE_OPTIONS,
+  PROMPT_REFERENCE_IMAGE_REQUIREMENTS,
+  getPromptReferenceImageLabel,
   optimizePromptWithAi,
+  type PromptReferenceImage,
   type PromptOptimizationMode,
 } from '@/services/prompt-optimizer'
 import { DEFAULT_AI_SETTINGS, type AiSettings } from '@/services/ai-types'
+
+interface UploadedReferenceImage extends PromptReferenceImage {
+  id: string
+  sizeBytes: number
+}
+
+const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
+const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
+const MAX_TOTAL_IMAGE_SIZE_BYTES = 20 * 1024 * 1024
 
 const router = useRouter()
 const sourceText = ref('')
@@ -32,18 +44,28 @@ const chinesePrompt = ref('')
 const englishPrompt = ref('')
 const mode = ref<PromptOptimizationMode>('T2VA')
 const durationSeconds = ref<number | null>(6)
+const fileInput = ref<HTMLInputElement | null>(null)
+const referenceImages = ref<UploadedReferenceImage[]>([])
 const settings = ref<AiSettings>({ ...DEFAULT_AI_SETTINGS })
 const loading = ref(false)
+const processingImages = ref(false)
 const errorMsg = ref('')
 const infoMsg = ref('')
 
 const missingSettingLabels = computed(() => getMissingAiSettingLabels(settings.value))
+const imageRequirement = computed(() => PROMPT_REFERENCE_IMAGE_REQUIREMENTS[mode.value])
+const imageRequirementMet = computed(
+  () =>
+    referenceImages.value.length >= imageRequirement.value.min &&
+    referenceImages.value.length <= imageRequirement.value.max,
+)
 const canOptimize = computed(
   () =>
     !!sourceText.value.trim() &&
     !loading.value &&
     typeof durationSeconds.value === 'number' &&
-    durationSeconds.value > 0,
+    durationSeconds.value > 0 &&
+    imageRequirementMet.value,
 )
 const hasResult = computed(() => !!chinesePrompt.value.trim() || !!englishPrompt.value.trim())
 const configSummary = computed(() =>
@@ -69,6 +91,16 @@ const inputPlaceholder = computed(() => {
 onMounted(loadSettings)
 onActivated(loadSettings)
 
+watch(mode, (nextMode, previousMode) => {
+  if (nextMode === previousMode) return
+  chinesePrompt.value = ''
+  englishPrompt.value = ''
+  if (referenceImages.value.length > 0) {
+    referenceImages.value = []
+    infoMsg.value = '输入模式已切换，请按新模式重新上传对应的参考图片'
+  }
+})
+
 async function loadSettings() {
   try {
     settings.value = await getAiSettings()
@@ -88,6 +120,11 @@ async function optimizePrompt() {
     return
   }
 
+  if (!imageRequirementMet.value) {
+    errorMsg.value = `${mode.value} 模式${imageRequirement.value.summary}`
+    return
+  }
+
   errorMsg.value = ''
   infoMsg.value = ''
   await loadSettings()
@@ -103,6 +140,7 @@ async function optimizePrompt() {
       settings: settings.value,
       mode: mode.value,
       durationSeconds: durationSeconds.value,
+      referenceImages: referenceImages.value,
     })
     chinesePrompt.value = result.chinesePrompt
     englishPrompt.value = result.englishPrompt
@@ -112,6 +150,94 @@ async function optimizePrompt() {
   } finally {
     loading.value = false
   }
+}
+
+function openImagePicker() {
+  fileInput.value?.click()
+}
+
+async function handleImageSelection(event: Event) {
+  const input = event.target as HTMLInputElement
+  const selectedFiles = Array.from(input.files ?? [])
+  input.value = ''
+
+  if (selectedFiles.length === 0) return
+
+  errorMsg.value = ''
+  infoMsg.value = ''
+  const remainingSlots = imageRequirement.value.max - referenceImages.value.length
+  if (selectedFiles.length > remainingSlots) {
+    errorMsg.value = `${mode.value} 模式还可上传 ${remainingSlots} 张图片`
+    return
+  }
+
+  const unsupportedFile = selectedFiles.find((file) => !SUPPORTED_IMAGE_TYPES.has(file.type))
+  if (unsupportedFile) {
+    errorMsg.value = `${unsupportedFile.name} 格式不支持，请使用 JPG、PNG 或 WebP`
+    return
+  }
+
+  const oversizedFile = selectedFiles.find((file) => file.size > MAX_IMAGE_SIZE_BYTES)
+  if (oversizedFile) {
+    errorMsg.value = `${oversizedFile.name} 超过 5 MB，请压缩后再上传`
+    return
+  }
+
+  const currentTotalSize = referenceImages.value.reduce(
+    (total, image) => total + image.sizeBytes,
+    0,
+  )
+  const selectedTotalSize = selectedFiles.reduce((total, file) => total + file.size, 0)
+  if (currentTotalSize + selectedTotalSize > MAX_TOTAL_IMAGE_SIZE_BYTES) {
+    errorMsg.value = '参考图片总大小不能超过 20 MB'
+    return
+  }
+
+  processingImages.value = true
+  try {
+    const nextImages = await Promise.all(
+      selectedFiles.map(async (file, index) => ({
+        id: `${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
+        name: file.name,
+        dataUrl: await readFileAsDataUrl(file),
+        sizeBytes: file.size,
+      })),
+    )
+    referenceImages.value.push(...nextImages)
+    chinesePrompt.value = ''
+    englishPrompt.value = ''
+    infoMsg.value = `已添加 ${nextImages.length} 张参考图片`
+  } catch (error) {
+    errorMsg.value = error instanceof Error ? error.message : '读取参考图片失败'
+  } finally {
+    processingImages.value = false
+  }
+}
+
+function removeReferenceImage(index: number) {
+  referenceImages.value.splice(index, 1)
+  chinesePrompt.value = ''
+  englishPrompt.value = ''
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result)
+        return
+      }
+      reject(new Error(`无法读取图片：${file.name}`))
+    }
+    reader.onerror = () => reject(new Error(`无法读取图片：${file.name}`))
+    reader.readAsDataURL(file)
+  })
+}
+
+function formatFileSize(sizeBytes: number): string {
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(0)} KB`
+  return `${(sizeBytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 async function copyText(text: string, label: string) {
@@ -146,6 +272,7 @@ function clearAll() {
   sourceText.value = ''
   chinesePrompt.value = ''
   englishPrompt.value = ''
+  referenceImages.value = []
   errorMsg.value = ''
   infoMsg.value = ''
 }
@@ -179,11 +306,16 @@ function openSettings() {
         </NSpace>
       </div>
       <NSpace align="center" wrap class="mode-row">
+        <div class="control-field">
+          <span class="control-label">生成模式</span>
           <NSelect
             v-model:value="mode"
             :options="PROMPT_OPTIMIZATION_MODE_OPTIONS"
             class="mode-select"
           />
+        </div>
+        <div class="control-field">
+          <span class="control-label">目标视频时长</span>
           <NInputNumber
             v-model:value="durationSeconds"
             :min="0.1"
@@ -193,9 +325,10 @@ function openSettings() {
           >
             <template #suffix>秒</template>
           </NInputNumber>
+        </div>
       </NSpace>
       <div class="toolbar-desc">
-        复用 AI 翻译的模型配置；英文版可直接用于 H3，中文版用于审阅和调整。
+        模型会按目标秒数安排镜头、动作、台词和声音；复用 AI 翻译的模型配置。
       </div>
     </div>
 
@@ -204,6 +337,13 @@ function openSettings() {
     </NAlert>
     <NAlert type="info" class="status-alert">
       {{ modeDescription }}
+    </NAlert>
+    <NAlert
+      v-if="mode !== 'T2VA' && !imageRequirementMet"
+      type="warning"
+      class="status-alert"
+    >
+      {{ imageRequirement.summary }}上传后会以图片中的真实内容为准，当前模型需要支持图像理解。
     </NAlert>
     <NAlert
       v-if="errorMsg"
@@ -223,6 +363,52 @@ function openSettings() {
     >
       {{ infoMsg }}
     </NAlert>
+
+    <NCard v-if="mode !== 'T2VA'" size="small" title="参考图片" class="reference-card">
+      <template #header-extra>
+        <NTag size="small" type="info">需要视觉模型</NTag>
+      </template>
+
+      <input
+        ref="fileInput"
+        class="file-input"
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        :multiple="imageRequirement.max > 1"
+        @change="handleImageSelection"
+      />
+
+      <div class="reference-toolbar">
+        <NButton
+          size="small"
+          secondary
+          type="primary"
+          :loading="processingImages"
+          :disabled="referenceImages.length >= imageRequirement.max"
+          @click="openImagePicker"
+        >
+          选择图片
+        </NButton>
+        <NText depth="3">
+          {{ imageRequirement.summary }}支持 JPG、PNG、WebP，单张不超过 5 MB。
+        </NText>
+      </div>
+
+      <div v-if="referenceImages.length" class="reference-grid">
+        <div v-for="(image, index) in referenceImages" :key="image.id" class="reference-item">
+          <img :src="image.dataUrl" :alt="getPromptReferenceImageLabel(mode, index)" />
+          <div class="reference-meta">
+            <NText strong>{{ getPromptReferenceImageLabel(mode, index) }}</NText>
+            <span :title="image.name">{{ image.name }}</span>
+            <span>{{ formatFileSize(image.sizeBytes) }}</span>
+          </div>
+          <NButton size="tiny" tertiary type="error" @click="removeReferenceImage(index)">
+            移除
+          </NButton>
+        </div>
+      </div>
+      <NEmpty v-else description="尚未上传参考图片" class="reference-empty" />
+    </NCard>
 
     <NCard size="small" title="创意描述" class="source-card">
       <NInput
@@ -290,6 +476,18 @@ function openSettings() {
   margin-top: 10px;
 }
 
+.control-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.control-label {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #6b7280;
+}
+
 .mode-select {
   width: 230px;
 }
@@ -304,6 +502,65 @@ function openSettings() {
 
 .source-card {
   margin-bottom: 12px;
+}
+
+.reference-card {
+  margin-bottom: 12px;
+}
+
+.file-input {
+  display: none;
+}
+
+.reference-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.reference-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.reference-item {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.reference-item img {
+  width: 88px;
+  height: 66px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #e5e7eb;
+}
+
+.reference-meta {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.reference-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reference-empty {
+  padding: 12px 0 4px;
 }
 
 .source-card :deep(textarea),
