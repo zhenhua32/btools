@@ -49,8 +49,10 @@ const referenceImages = ref<UploadedReferenceImage[]>([])
 const settings = ref<AiSettings>({ ...DEFAULT_AI_SETTINGS })
 const loading = ref(false)
 const processingImages = ref(false)
+const isDraggingImages = ref(false)
 const errorMsg = ref('')
 const infoMsg = ref('')
+let imageDragDepth = 0
 
 const missingSettingLabels = computed(() => getMissingAiSettingLabels(settings.value))
 const imageRequirement = computed(() => PROMPT_REFERENCE_IMAGE_REQUIREMENTS[mode.value])
@@ -59,6 +61,16 @@ const imageRequirementMet = computed(
     referenceImages.value.length >= imageRequirement.value.min &&
     referenceImages.value.length <= imageRequirement.value.max,
 )
+const canAddReferenceImages = computed(
+  () => !processingImages.value && referenceImages.value.length < imageRequirement.value.max,
+)
+const imageDropZoneLabel = computed(() => {
+  if (processingImages.value) return '正在读取图片…'
+  if (referenceImages.value.length >= imageRequirement.value.max) {
+    return `已达到 ${mode.value} 模式的图片数量上限`
+  }
+  return '拖动图片到这里，或点击选择'
+})
 const canOptimize = computed(
   () =>
     !!sourceText.value.trim() &&
@@ -153,6 +165,7 @@ async function optimizePrompt() {
 }
 
 function openImagePicker() {
+  if (!canAddReferenceImages.value) return
   fileInput.value?.click()
 }
 
@@ -161,11 +174,45 @@ async function handleImageSelection(event: Event) {
   const selectedFiles = Array.from(input.files ?? [])
   input.value = ''
 
-  if (selectedFiles.length === 0) return
+  await addReferenceImageFiles(selectedFiles)
+}
+
+function handleImageDragEnter(event: DragEvent) {
+  if (!event.dataTransfer?.types.includes('Files')) return
+  imageDragDepth += 1
+  isDraggingImages.value = true
+}
+
+function handleImageDragOver(event: DragEvent) {
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = canAddReferenceImages.value ? 'copy' : 'none'
+  }
+}
+
+function handleImageDragLeave(event: DragEvent) {
+  if (!event.dataTransfer?.types.includes('Files')) return
+  imageDragDepth = Math.max(0, imageDragDepth - 1)
+  if (imageDragDepth === 0) {
+    isDraggingImages.value = false
+  }
+}
+
+async function handleImageDrop(event: DragEvent) {
+  imageDragDepth = 0
+  isDraggingImages.value = false
+  await addReferenceImageFiles(Array.from(event.dataTransfer?.files ?? []))
+}
+
+async function addReferenceImageFiles(selectedFiles: File[]) {
+  if (selectedFiles.length === 0 || processingImages.value) return
 
   errorMsg.value = ''
   infoMsg.value = ''
   const remainingSlots = imageRequirement.value.max - referenceImages.value.length
+  if (remainingSlots <= 0) {
+    errorMsg.value = `${mode.value} 模式最多上传 ${imageRequirement.value.max} 张图片`
+    return
+  }
   if (selectedFiles.length > remainingSlots) {
     errorMsg.value = `${mode.value} 模式还可上传 ${remainingSlots} 张图片`
     return
@@ -378,17 +425,24 @@ function openSettings() {
         @change="handleImageSelection"
       />
 
-      <div class="reference-toolbar">
-        <NButton
-          size="small"
-          secondary
-          type="primary"
-          :loading="processingImages"
-          :disabled="referenceImages.length >= imageRequirement.max"
-          @click="openImagePicker"
-        >
-          选择图片
-        </NButton>
+      <div
+        class="image-drop-zone"
+        :class="{
+          'image-drop-zone--active': isDraggingImages && canAddReferenceImages,
+          'image-drop-zone--disabled': !canAddReferenceImages,
+        }"
+        role="button"
+        :tabindex="canAddReferenceImages ? 0 : -1"
+        :aria-disabled="!canAddReferenceImages"
+        @click="openImagePicker"
+        @keydown.enter.prevent="openImagePicker"
+        @keydown.space.prevent="openImagePicker"
+        @dragenter.prevent="handleImageDragEnter"
+        @dragover.prevent="handleImageDragOver"
+        @dragleave.prevent="handleImageDragLeave"
+        @drop.prevent="handleImageDrop"
+      >
+        <strong>{{ imageDropZoneLabel }}</strong>
         <NText depth="3">
           {{ imageRequirement.summary }}支持 JPG、PNG、WebP，单张不超过 5 MB。
         </NText>
@@ -512,11 +566,47 @@ function openSettings() {
   display: none;
 }
 
-.reference-toolbar {
+.image-drop-zone {
   display: flex;
+  min-height: 92px;
+  box-sizing: border-box;
+  flex-direction: column;
   align-items: center;
-  gap: 12px;
+  justify-content: center;
+  gap: 6px;
   margin-bottom: 12px;
+  padding: 16px;
+  border: 2px dashed #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #334155;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    background-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.image-drop-zone:not(.image-drop-zone--disabled):hover,
+.image-drop-zone:not(.image-drop-zone--disabled):focus-visible,
+.image-drop-zone--active {
+  border-color: #3b82f6;
+  background: #eff6ff;
+  box-shadow: 0 0 0 3px rgb(59 130 246 / 12%);
+  outline: none;
+}
+
+.image-drop-zone--active {
+  border-style: solid;
+}
+
+.image-drop-zone--disabled {
+  border-color: #e2e8f0;
+  background: #f8fafc;
+  color: #94a3b8;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .reference-grid {
