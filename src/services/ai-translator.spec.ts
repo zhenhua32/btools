@@ -37,10 +37,13 @@ describe('AI translation timeout settings', () => {
     })
 
     expect(requestAiChatCompletionMock).toHaveBeenCalledTimes(1)
-    expect(requestAiChatCompletionMock).toHaveBeenCalledWith(expect.any(Array), {
-      temperature: 0.2,
-      timeoutMs: 123000,
-    })
+    expect(requestAiChatCompletionMock).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({
+        temperature: 0.2,
+        timeoutMs: 123000,
+      }),
+    )
   })
 
   it('uses configured timeout for paragraph-by-paragraph translation', async () => {

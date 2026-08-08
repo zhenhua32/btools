@@ -110,6 +110,10 @@ function validateForm(): string {
     return '请填写模型名称'
   }
 
+  if (!formState.promptOptimizerSystemPrompt.trim()) {
+    return '请填写提示词优化系统提示词'
+  }
+
   if (!formState.defaultTargetLanguage.trim()) {
     return '请填写默认目标语言'
   }
@@ -184,6 +188,22 @@ function validateForm(): string {
             placeholder="给模型的固定上下文提示词"
             :autosize="{ minRows: 4, maxRows: 8 }"
           />
+        </NFormItem>
+      </NForm>
+    </NCard>
+
+    <NCard size="small" title="提示词优化" class="settings-section">
+      <NForm label-placement="top">
+        <NFormItem label="MiniMax-H3 指南改写系统提示词">
+          <NInput
+            v-model:value="formState.promptOptimizerSystemPrompt"
+            type="textarea"
+            placeholder="用于将用户描述改写为 MiniMax-H3 中英文提示词"
+            :autosize="{ minRows: 10, maxRows: 24 }"
+          />
+          <template #feedback>
+            此提示词会与上方相同的模型配置一起使用，可按需修改；恢复默认可还原内置指南。
+          </template>
         </NFormItem>
       </NForm>
     </NCard>

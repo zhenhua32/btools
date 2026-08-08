@@ -19,6 +19,9 @@ BTools 是一个基于 Vue 3 和 Chrome Extension Manifest V3 的浏览器工具
 	- 段落流结果展示
 	- 左右对照翻译
 	- OpenAI 兼容接口配置
+- AI 提示词优化
+	- 按 MiniMax-H3 官方指南支持 T2VA、I2VA、FL2VA、L2VA 与 Ref2VA
+	- 一次生成结构对应的中文审阅版与英文直用版
 
 ## 本地开发
 
@@ -42,3 +45,10 @@ npm run test
 2. AI 配置保存在当前浏览器本地，不会写入项目文件。
 3. AI 翻译通过扩展后台代理调用 OpenAI 兼容 chat/completions 接口。
 4. 为支持自定义兼容接口，扩展清单增加了较宽的网络访问权限。
+
+## AI 提示词优化说明
+
+1. 复用“AI 设置”中的 Base URL、API Key、Model 和请求超时配置。
+2. 在“AI 提示词优化”中选择 H3 输入模式、填写视频时长和创意描述。
+3. 生成结果包含中文审阅版和英文直用版。
+4. MiniMax-H3 指南改写系统提示词可在“AI 设置”中修改，并可通过“恢复默认”还原。

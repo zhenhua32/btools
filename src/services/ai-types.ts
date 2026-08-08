@@ -1,3 +1,5 @@
+import { DEFAULT_PROMPT_OPTIMIZER_SYSTEM_PROMPT } from './prompt-optimizer-system-prompt'
+
 export type AiDisplayMode = 'paragraph-stream' | 'side-by-side'
 export type TranslationStrategy = 'whole-document' | 'paragraph-by-paragraph'
 export type AiChatRole = 'system' | 'user' | 'assistant'
@@ -8,6 +10,7 @@ export interface AiSettings {
   apiKey: string
   model: string
   systemPrompt: string
+  promptOptimizerSystemPrompt: string
   defaultTargetLanguage: string
   defaultDisplayMode: AiDisplayMode
   defaultTranslationStrategy: TranslationStrategy
@@ -139,6 +142,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   apiKey: '',
   model: '',
   systemPrompt: '你是一名专业翻译助手，请忠实翻译文本并保留原有格式。',
+  promptOptimizerSystemPrompt: DEFAULT_PROMPT_OPTIMIZER_SYSTEM_PROMPT,
   defaultTargetLanguage: '中文',
   defaultDisplayMode: 'paragraph-stream',
   defaultTranslationStrategy: 'whole-document',
@@ -187,6 +191,9 @@ export function normalizeAiSettings(input?: Partial<AiSettings> | null): AiSetti
     apiKey: input?.apiKey?.trim() || '',
     model: input?.model?.trim() || '',
     systemPrompt: input?.systemPrompt?.trim() || DEFAULT_AI_SETTINGS.systemPrompt,
+    promptOptimizerSystemPrompt:
+      input?.promptOptimizerSystemPrompt?.trim() ||
+      DEFAULT_AI_SETTINGS.promptOptimizerSystemPrompt,
     defaultTargetLanguage:
       input?.defaultTargetLanguage?.trim() || DEFAULT_AI_SETTINGS.defaultTargetLanguage,
     defaultDisplayMode,
