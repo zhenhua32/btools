@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { extractPageContentFromDocument } from './page-translate-extractor'
 import arxivFixtureHtml from './fixtures/page-translate-arxiv.html?raw'
 import commentLikeFixtureHtml from './fixtures/page-translate-comment-like.html?raw'
+import huggingFaceFixtureHtml from './fixtures/page-translate-hugging-face.html?raw'
 
 function repeatSentence(sentence: string, count: number): string {
   return Array.from({ length: count }, () => sentence).join(' ')
@@ -45,5 +46,23 @@ describe('extractPageContentFromDocument', () => {
     expect(extracted.text).not.toContain(
       'Readers can leave comments, reactions, and related discussion in this sidebar widget.',
     )
+  })
+
+  it('prefers the rendered Markdown prose over Hugging Face repository navigation', () => {
+    document.title = 'docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md · MiniMaxAI/MiniMax-H3 at main'
+    window.history.replaceState(
+      {},
+      '',
+      '/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md',
+    )
+    document.body.innerHTML = huggingFaceFixtureHtml
+
+    const extracted = extractPageContentFromDocument(document)
+
+    expect(extracted.rootElement.classList).toContain('prose')
+    expect(extracted.text).toContain('Video Prompt Writing Guide')
+    expect(extracted.text).toContain('overall_soundscape')
+    expect(extracted.text).not.toContain('Google Colab')
+    expect(extracted.text).not.toContain('Kaggle')
   })
 })

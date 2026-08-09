@@ -53,7 +53,7 @@ const HIGH_CONFIDENCE_TEXT_SELECTOR =
   'p, h1, h2, h3, h4, h5, h6, blockquote, pre, figcaption, ul, ol, table, dl'
 
 const MAIN_ROOT_CANDIDATE_SELECTOR =
-  'main, article, [role="main"], .article, .post, .content, .article-content, .post-content, .entry-content, #content, #main, div[id*="content" i], div[class*="content" i], div[class*="article" i], div[class*="post" i], div[class*="entry" i], section[id*="content" i], section[class*="content" i], section[class*="article" i], section[class*="post" i], section[class*="entry" i], main[id*="content" i], main[class*="content" i], main[class*="article" i], main[class*="post" i], main[class*="entry" i], article[id*="content" i], article[class*="content" i], article[class*="article" i], article[class*="post" i], article[class*="entry" i]'
+  'main, article, [role="main"], [itemprop="articleBody"], .article, .post, .content, .article-content, .post-content, .entry-content, .prose, .markdown, .markdown-body, #content, #main, div[id*="content" i], div[class*="content" i], div[class*="article" i], div[class*="post" i], div[class*="entry" i], section[id*="content" i], section[class*="content" i], section[class*="article" i], section[class*="post" i], section[class*="entry" i], main[id*="content" i], main[class*="content" i], main[class*="article" i], main[class*="post" i], main[class*="entry" i], article[id*="content" i], article[class*="content" i], article[class*="article" i], article[class*="post" i], article[class*="entry" i]'
 
 const EXCLUDED_PAGE_TRANSLATE_HINT_PATTERN =
   /(share|social|comment|related|recommend|breadcrumb|pagination|newsletter|subscribe|advert|ads|cookie|author|byline|meta|toolbar|reaction|promo|banner|outbrain|taboola)/i

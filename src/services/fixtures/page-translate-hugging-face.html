@@ -1,0 +1,50 @@
+<main class="flex flex-1 flex-col">
+  <div class="SVELTE_HYDRATER contents">
+    <section>
+      <h2>Repository actions and integrations</h2>
+      <p>
+        Open this repository file in a connected notebook environment or browse the surrounding
+        project files, commits, contributors, deployment options, and repository settings.
+      </p>
+      <ul>
+        <li><a href="/MiniMaxAI/MiniMax-H3/colab">Google Colab</a> notebook integration</li>
+        <li><a href="/MiniMaxAI/MiniMax-H3/kaggle">Kaggle</a> notebook integration</li>
+        <li>Repository history, branches, tags, discussions, and community contributions</li>
+      </ul>
+    </section>
+  </div>
+
+  <section class="pt-8 border-gray-100 col-span-full">
+    <div class="relative flex flex-col rounded-b-lg border border-t-0">
+      <div class="py-4 px-4 sm:px-6 prose hf-sanitized copiable-code-container">
+        <h1>Video Prompt Writing Guide</h1>
+        <p>
+          This guide defines a stable schema for writing precise video-generation prompts. It
+          explains how to describe subjects, actions, environments, cinematography, timing, and
+          synchronized audio while preserving a clear separation between global and shot-level
+          instructions.
+        </p>
+        <h2>1. Core principles</h2>
+        <p>
+          Describe only visible and audible details. Use concrete language, keep the chronology
+          explicit, and avoid instructions that cannot be represented in the generated video.
+        </p>
+        <h2>2. Shot structure</h2>
+        <p>
+          Each shot should identify the camera framing, subject motion, environmental changes, and
+          transitions. Dialogue and synchronized sound events belong with the shot where they occur.
+        </p>
+        <h2>3. Audio fields</h2>
+        <p>
+          The overall_soundscape field summarizes ambience and physical sounds across the complete
+          video. Background music intended only for the audience belongs in non_diegetic_music.
+        </p>
+        <pre><code>overall_soundscape: Quiet indoor room tone and a low ventilation hum continue throughout the video.</code></pre>
+        <p>
+          When reference audio is used, state its relationship only in the section matching the
+          audible layer so that the prompt remains unambiguous and internally consistent.
+        </p>
+      </div>
+    </div>
+  </section>
+</main>
