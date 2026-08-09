@@ -1,17 +1,72 @@
 {
-    "repository":  "https://huggingface.co/MiniMaxAI/MiniMax-H3",
-    "revision":  "bfc8ed0353f5a9733be73e6b2c98ec0948195b86",
-    "files":  [
-                  {
-                      "path":  "docs/VIDEO_PROMPT_WRITING_GUIDE_base_en.md",
-                      "sha256":  "2cfebc096a6e08370f288d468d90b60f7f9bcb938f94bf090816e910e48e75fc",
-                      "size":  15773
-                  },
-                  {
-                      "path":  "docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md",
-                      "sha256":  "1e574f356716ad55612247ffb7bbccbcdb484ad96599d63c7dca1af186b1fab7",
-                      "size":  23553
-                  }
-              ],
-    "license":  "LICENSE"
+  "license": "LICENSE",
+  "sources": [
+    {
+      "repository": "https://huggingface.co/MiniMaxAI/MiniMax-H3",
+      "revision": "bfc8ed0353f5a9733be73e6b2c98ec0948195b86",
+      "files": [
+        {
+          "path": "docs/VIDEO_PROMPT_WRITING_GUIDE_base_en.md",
+          "sha256": "2cfebc096a6e08370f288d468d90b60f7f9bcb938f94bf090816e910e48e75fc",
+          "size": 15773
+        },
+        {
+          "path": "docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md",
+          "sha256": "1e574f356716ad55612247ffb7bbccbcdb484ad96599d63c7dca1af186b1fab7",
+          "size": 23553
+        }
+      ]
+    },
+    {
+      "repository": "https://github.com/MiniMax-AI/MiniMax-H3",
+      "revision": "8d8824efaf94586c0cc9ac7ad8d0723d4d6420ea",
+      "files": [
+        {
+          "path": "skills/h3-prompt-writing/SKILL.md",
+          "sha256": "003b9dac9785df5207a88581629c51c1747c061282c7d48f7032618bd141a93d",
+          "size": 1912
+        },
+        {
+          "path": "skills/minimalist-product-ad-generator/SKILL.cn.md",
+          "sha256": "287341821b2104ca0caf61326dfdddc5efff09479bb2be321eeaa7cb8d4d01fa",
+          "size": 27711
+        },
+        {
+          "path": "skills/3d-animation-short-generator/SKILL.cn.md",
+          "sha256": "54767a6b3c0194390a7c16a176269046c3fea6d20eb787c60789994a07228dda",
+          "size": 39545
+        },
+        {
+          "path": "skills/papercraft-stop-motion-explainer/SKILL.cn.md",
+          "sha256": "94dfb06a487aef8a3d74c5ec7f645fdbd79648dee06934889d823f2624171237",
+          "size": 19958
+        },
+        {
+          "path": "skills/brand-promo-video-generator/SKILL.cn.md",
+          "sha256": "e148ad61fe77114543b03ca68d9e1bc4b343d972d3264f6f2a014eaa27f55243",
+          "size": 11474
+        },
+        {
+          "path": "skills/mv-subtitle-skill-confirmed/SKILL.cn.md",
+          "sha256": "6a44651945455ba73f8884474027d33afccb7d34485ae6977b454c4c112b6f10",
+          "size": 14930
+        },
+        {
+          "path": "skills/co-op-game-intro-generator/SKILL.cn.md",
+          "sha256": "42120f68416eb0ba3b6fd1d1755b902438cc25c89c0e3c30d445b0d566c7237a",
+          "size": 7673
+        },
+        {
+          "path": "skills/paper-collage-explainer-generator/SKILL.cn.md",
+          "sha256": "ceaecc38dcf78294d12e658c57b690a0f671bc4b9f7292ef5a65a7db178da4aa",
+          "size": 17427
+        },
+        {
+          "path": "skills/handdrawn-live-video-generator/SKILL.cn.md",
+          "sha256": "ce4a4bcc867def998cd964a15367a9b12cb11534b94a33ed95a4107f49d3de08",
+          "size": 6978
+        }
+      ]
+    }
+  ]
 }

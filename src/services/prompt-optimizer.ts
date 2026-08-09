@@ -1,5 +1,9 @@
 import { requestAiChatCompletion } from './ai-client'
 import { translateTextWithAi } from './ai-translator'
+import {
+  buildPromptOptimizerSystemInstruction,
+  type PromptOptimizerSkillSelection,
+} from './prompt-optimizer-skills'
 import type {
   AiChatImageUrlContentPart,
   AiChatMessage,
@@ -14,6 +18,7 @@ export interface OptimizePromptOptions {
   mode: PromptOptimizationMode
   durationSeconds: number
   referenceImages?: PromptReferenceImage[]
+  skillSelection?: PromptOptimizerSkillSelection
   onProgress?: (message: string) => void
 }
 
@@ -161,7 +166,11 @@ export function buildPromptOptimizationMessages(
   return [
     {
       role: 'system',
-      content: options.settings.promptOptimizerSystemPrompt,
+      content: buildPromptOptimizerSystemInstruction({
+        configuredSystemPrompt: options.settings.promptOptimizerSystemPrompt,
+        mode: options.mode,
+        skillSelection: options.skillSelection,
+      }),
     },
     {
       role: 'user',

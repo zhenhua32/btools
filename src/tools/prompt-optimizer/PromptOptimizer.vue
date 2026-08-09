@@ -5,6 +5,7 @@ import {
   NAlert,
   NButton,
   NCard,
+  NCheckbox,
   NEmpty,
   NInput,
   NInputNumber,
@@ -12,6 +13,7 @@ import {
   NSpace,
   NTag,
   NText,
+  type SelectOption,
 } from 'naive-ui'
 import {
   getAiSettings,
@@ -27,6 +29,15 @@ import {
   type PromptReferenceImage,
   type PromptOptimizationMode,
 } from '@/services/prompt-optimizer'
+import {
+  DEFAULT_PROMPT_OPTIMIZER_SKILL_SELECTION,
+  H3_PROMPT_WRITING_SKILL_DESCRIPTION,
+  PROMPT_OPTIMIZER_STYLE_SKILL_OPTIONS,
+  getPromptOptimizerStyleSkillOption,
+  normalizePromptOptimizerSkillSelection,
+  type PromptOptimizerSkillSelection,
+  type PromptOptimizerStyleSkillId,
+} from '@/services/prompt-optimizer-skills'
 import { DEFAULT_AI_SETTINGS, type AiSettings } from '@/services/ai-types'
 
 interface UploadedReferenceImage extends PromptReferenceImage {
@@ -37,6 +48,7 @@ interface UploadedReferenceImage extends PromptReferenceImage {
 const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
 const MAX_TOTAL_IMAGE_SIZE_BYTES = 20 * 1024 * 1024
+const SKILL_SELECTION_STORAGE_KEY = 'btools:prompt-optimizer-skill-selection'
 
 const router = useRouter()
 const sourceText = ref('')
@@ -46,6 +58,12 @@ const mode = ref<PromptOptimizationMode>('T2VA')
 const durationSeconds = ref<number | null>(6)
 const fileInput = ref<HTMLInputElement | null>(null)
 const referenceImages = ref<UploadedReferenceImage[]>([])
+const useBasePromptWritingSkill = ref(
+  DEFAULT_PROMPT_OPTIMIZER_SKILL_SELECTION.useBasePromptWritingSkill,
+)
+const styleSkillId = ref<PromptOptimizerStyleSkillId | null>(
+  DEFAULT_PROMPT_OPTIMIZER_SKILL_SELECTION.styleSkillId,
+)
 const settings = ref<AiSettings>({ ...DEFAULT_AI_SETTINGS })
 const loading = ref(false)
 const processingImages = ref(false)
@@ -84,6 +102,18 @@ const configSummary = computed(() =>
   isAiSettingsConfigured(settings.value) ? settings.value.model : '模型未配置',
 )
 const modeDescription = computed(() => PROMPT_OPTIMIZATION_MODE_DESCRIPTIONS[mode.value])
+const selectedStyleSkill = computed(() =>
+  getPromptOptimizerStyleSkillOption(styleSkillId.value),
+)
+const activeSkillCount = computed(
+  () => Number(useBasePromptWritingSkill.value) + Number(!!styleSkillId.value),
+)
+const styleSkillSelectOptions: SelectOption[] = PROMPT_OPTIMIZER_STYLE_SKILL_OPTIONS.map(
+  (option) => ({
+    label: option.label,
+    value: option.value,
+  }),
+)
 const inputPlaceholder = computed(() => {
   if (mode.value === 'Ref2VA') {
     return '描述目标视频，并逐项写清参考图片、视频、音频中的人物、场景、动作或声音分别要如何使用...'
@@ -100,8 +130,14 @@ const inputPlaceholder = computed(() => {
   return '输入视频创意，例如主体、场景、动作、镜头、台词、声音和画面风格...'
 })
 
-onMounted(loadSettings)
-onActivated(loadSettings)
+onMounted(() => {
+  loadSettings()
+  loadSkillSelection()
+})
+onActivated(() => {
+  loadSettings()
+  loadSkillSelection()
+})
 
 watch(mode, (nextMode, previousMode) => {
   if (nextMode === previousMode) return
@@ -113,11 +149,45 @@ watch(mode, (nextMode, previousMode) => {
   }
 })
 
+watch([useBasePromptWritingSkill, styleSkillId], () => {
+  chinesePrompt.value = ''
+  englishPrompt.value = ''
+  saveSkillSelection()
+})
+
 async function loadSettings() {
   try {
     settings.value = await getAiSettings()
   } catch (error) {
     errorMsg.value = error instanceof Error ? error.message : '读取 AI 设置失败'
+  }
+}
+
+function loadSkillSelection() {
+  try {
+    const raw = window.localStorage.getItem(SKILL_SELECTION_STORAGE_KEY)
+    if (!raw) return
+    const selection = normalizePromptOptimizerSkillSelection(
+      JSON.parse(raw) as Partial<PromptOptimizerSkillSelection>,
+    )
+    useBasePromptWritingSkill.value = selection.useBasePromptWritingSkill
+    styleSkillId.value = selection.styleSkillId
+  } catch {
+    // Keep the safe defaults when a legacy or corrupted value cannot be parsed.
+  }
+}
+
+function saveSkillSelection() {
+  try {
+    window.localStorage.setItem(
+      SKILL_SELECTION_STORAGE_KEY,
+      JSON.stringify({
+        useBasePromptWritingSkill: useBasePromptWritingSkill.value,
+        styleSkillId: styleSkillId.value,
+      }),
+    )
+  } catch {
+    // Skill selection remains usable for the current page even if storage is unavailable.
   }
 }
 
@@ -153,6 +223,10 @@ async function optimizePrompt() {
       mode: mode.value,
       durationSeconds: durationSeconds.value,
       referenceImages: referenceImages.value,
+      skillSelection: {
+        useBasePromptWritingSkill: useBasePromptWritingSkill.value,
+        styleSkillId: styleSkillId.value,
+      },
       onProgress: (message) => {
         infoMsg.value = message
       },
@@ -388,6 +462,48 @@ function openSettings() {
     <NAlert type="info" class="status-alert">
       {{ modeDescription }}
     </NAlert>
+    <NCard size="small" title="MiniMax H3 官方 Skills" class="skill-card">
+      <template #header-extra>
+        <NTag v-if="activeSkillCount" size="small" type="success">
+          已启用 {{ activeSkillCount }} 个
+        </NTag>
+        <NTag v-else size="small">未启用</NTag>
+      </template>
+
+      <div class="skill-controls">
+        <div class="skill-control-block">
+          <NCheckbox v-model:checked="useBasePromptWritingSkill">
+            基础写作 Skill
+          </NCheckbox>
+          <NText depth="3">{{ H3_PROMPT_WRITING_SKILL_DESCRIPTION }}</NText>
+        </div>
+
+        <div class="skill-control-block">
+          <span class="control-label">风格 / 场景 Skill（可选，单选）</span>
+          <NSelect
+            v-model:value="styleSkillId"
+            :options="styleSkillSelectOptions"
+            clearable
+            filterable
+            placeholder="不使用风格 Skill"
+            class="style-skill-select"
+          />
+          <NText v-if="selectedStyleSkill" depth="3">
+            {{ selectedStyleSkill.description }}
+          </NText>
+        </div>
+      </div>
+
+      <div class="skill-flow-hint">
+        <template v-if="useBasePromptWritingSkill">
+          当前由基础写作 Skill 按 {{ mode }} 模式加载对应指南，不发送设置中的提示词优化系统提示词。
+        </template>
+        <template v-else>
+          当前仍使用设置中的提示词优化系统提示词。
+        </template>
+        风格 Skill 只参与最终 H3 提示词编译；其中的问询、确认、媒体生成和剪辑步骤会自动跳过。
+      </div>
+    </NCard>
     <NAlert
       v-if="mode !== 'T2VA' && !imageRequirementMet"
       type="warning"
@@ -557,6 +673,36 @@ function openSettings() {
   margin-bottom: 8px;
 }
 
+.skill-card {
+  margin-bottom: 12px;
+}
+
+.skill-controls {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(320px, 1.2fr);
+  gap: 16px;
+}
+
+.skill-control-block {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.style-skill-select {
+  width: 100%;
+}
+
+.skill-flow-hint {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #e5e7eb;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .source-card {
   margin-bottom: 12px;
 }
@@ -684,6 +830,10 @@ function openSettings() {
   }
 
   .result-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .skill-controls {
     grid-template-columns: 1fr;
   }
 }
