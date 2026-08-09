@@ -153,10 +153,13 @@ async function optimizePrompt() {
       mode: mode.value,
       durationSeconds: durationSeconds.value,
       referenceImages: referenceImages.value,
+      onProgress: (message) => {
+        infoMsg.value = message
+      },
     })
     chinesePrompt.value = result.chinesePrompt
     englishPrompt.value = result.englishPrompt
-    infoMsg.value = '中英文提示词已按 MiniMax-H3 指南生成'
+    infoMsg.value = '英文 H3 提示词已生成，并完成中文审阅版翻译'
   } catch (error) {
     errorMsg.value = error instanceof Error ? error.message : '提示词优化失败'
   } finally {

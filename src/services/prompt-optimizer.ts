@@ -1,4 +1,5 @@
 import { requestAiChatCompletion } from './ai-client'
+import { translateTextWithAi } from './ai-translator'
 import type {
   AiChatImageUrlContentPart,
   AiChatMessage,
@@ -13,6 +14,7 @@ export interface OptimizePromptOptions {
   mode: PromptOptimizationMode
   durationSeconds: number
   referenceImages?: PromptReferenceImage[]
+  onProgress?: (message: string) => void
 }
 
 export interface PromptReferenceImage {
@@ -31,6 +33,13 @@ export interface OptimizedPromptResult {
   chinesePrompt: string
   englishPrompt: string
 }
+
+const H3_REVIEW_TRANSLATION_SYSTEM_PROMPT = `你正在翻译一份可直接提交给 MiniMax-H3 的英文视频提示词。请把其中的描述性英文完整翻译为简体中文审阅版，并遵守以下规则：
+1. 保持原有段落、换行、字段顺序和镜头顺序，不总结、不删减、不扩写。
+2. 以下结构内容必须原样保留：字段名、[Shot N]、时间戳、<Subject N>、<Picture N>、<Video N>、<Audio N>、(Sx)、<d>、<scenetrans>、<cutoff> 以及 retention marker。
+3. <d> 标签内的语言标签、用户原始台词或歌词不得翻译或改写；画面中使用英文双引号包裹的原始文字也保持不变。
+4. 除上述必须保留的内容外，所有叙事、动作、镜头、场景、声音和风格描述都必须翻译成简体中文，不能整段保留英文。
+5. 只输出完整中文审阅版正文，不输出原文、JSON、Markdown 代码围栏、标题或解释。`
 
 export const PROMPT_OPTIMIZATION_MODE_OPTIONS: Array<{
   label: string
@@ -83,6 +92,7 @@ export async function optimizePromptWithAi(
     throw new Error(referenceImageError)
   }
 
+  options.onProgress?.('正在生成英文 H3 正式提示词…')
   const response = await requestAiChatCompletion(
     buildPromptOptimizationMessages(source, options),
     {
@@ -93,7 +103,30 @@ export async function optimizePromptWithAi(
     },
   )
 
-  return parsePromptOptimizationResponse(response.content)
+  const englishPrompt = parseEnglishPromptOptimizationResponse(response.content)
+
+  options.onProgress?.('英文提示词已生成，正在翻译中文审阅版…')
+  const translation = await translateTextWithAi(englishPrompt, {
+    settings: {
+      ...options.settings,
+      systemPrompt: [
+        options.settings.systemPrompt.trim(),
+        H3_REVIEW_TRANSLATION_SYSTEM_PROMPT,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      defaultTargetLanguage: '简体中文',
+      defaultTranslationStrategy: 'whole-document',
+      enableStreaming: false,
+    },
+    strategy: 'whole-document',
+  })
+  const chinesePrompt = parseChineseReviewTranslation(englishPrompt, translation.text)
+
+  return {
+    chinesePrompt,
+    englishPrompt,
+  }
 }
 
 export function buildPromptOptimizationMessages(
@@ -123,7 +156,7 @@ export function buildPromptOptimizationMessages(
 
   const userContent = referenceImages.length
     ? buildMultimodalUserContent(requestText, options.mode, referenceImages)
-    : `${requestText}\n\n请在不改变用户意图的前提下补足可执行的视听细节，并严格按系统消息要求返回中英文两版 JSON。`
+    : `${requestText}\n\n请在不改变用户意图的前提下补足可执行的视听细节。本阶段只生成可直接提交给 MiniMax-H3 的英文正式提示词，并严格按系统消息要求返回只含 englishPrompt 的 JSON。不要生成中文版本。`
 
   return [
     {
@@ -209,23 +242,17 @@ function buildMultimodalUserContent(
 
   parts.push({
     type: 'text',
-    text: '现在请以这些图片中的可见事实为锚点，在不改变用户意图的前提下补足可执行的视听细节，并严格按系统消息要求返回中英文两版 JSON。',
+    text: '现在请以这些图片中的可见事实为锚点，在不改变用户意图的前提下补足可执行的视听细节。本阶段只生成可直接提交给 MiniMax-H3 的英文正式提示词，并严格按系统消息要求返回只含 englishPrompt 的 JSON。不要生成中文版本。',
   })
 
   return parts
 }
 
-export function parsePromptOptimizationResponse(content: string): OptimizedPromptResult {
+export function parseEnglishPromptOptimizationResponse(content: string): string {
   const normalized = stripMarkdownFence(content.trim())
   const parsed = parseJsonObject(normalized)
   const candidate = getResultCandidate(parsed)
 
-  const chinesePrompt = readString(candidate, [
-    'chinesePrompt',
-    'chinese_prompt',
-    'zhPrompt',
-    'zh_prompt',
-  ])
   const englishPrompt = readString(candidate, [
     'englishPrompt',
     'english_prompt',
@@ -233,14 +260,66 @@ export function parsePromptOptimizationResponse(content: string): OptimizedPromp
     'en_prompt',
   ])
 
-  if (!chinesePrompt || !englishPrompt) {
-    throw new Error('模型返回的中英文提示词不完整，请重试或检查提示词优化系统提示词')
+  if (!englishPrompt) {
+    throw new Error('模型未返回英文 H3 提示词，请重试或检查提示词优化系统提示词')
   }
 
-  return {
-    chinesePrompt,
-    englishPrompt,
+  return englishPrompt
+}
+
+export function parseChineseReviewTranslation(
+  englishPrompt: string,
+  translatedContent: string,
+): string {
+  const chinesePrompt = stripMarkdownFence(translatedContent.trim())
+
+  if (!chinesePrompt) {
+    throw new Error('翻译模型未返回中文审阅版，请重试')
   }
+
+  const missingStructuralTokens = getMissingStructuralTokens(englishPrompt, chinesePrompt)
+  if (missingStructuralTokens.length > 0) {
+    throw new Error(
+      `翻译模型改动了 H3 结构标记（缺少 ${missingStructuralTokens.slice(0, 3).join('、')}），请重试`,
+    )
+  }
+
+  if (!looksLikeChineseTranslation(englishPrompt, chinesePrompt)) {
+    throw new Error('翻译模型返回的中文审阅版仍以英文为主，请重试或检查 AI 翻译设置')
+  }
+
+  return chinesePrompt
+}
+
+function looksLikeChineseTranslation(source: string, translated: string): boolean {
+  if (normalizeComparableText(source) === normalizeComparableText(translated)) {
+    return false
+  }
+
+  const descriptiveText = translated
+    .replace(/<d>[\s\S]*?<\/d>/gi, '')
+    .replace(/"[^"\r\n]*"/g, '')
+  const chineseCharacterCount = descriptiveText.match(/[\u3400-\u4dbf\u4e00-\u9fff]/g)?.length ?? 0
+  const latinCharacterCount = descriptiveText.match(/[a-z]/gi)?.length ?? 0
+  const languageCharacterCount = chineseCharacterCount + latinCharacterCount
+
+  return (
+    chineseCharacterCount >= 8 &&
+    languageCharacterCount > 0 &&
+    chineseCharacterCount / languageCharacterCount >= 0.08
+  )
+}
+
+function getMissingStructuralTokens(source: string, translated: string): string[] {
+  const tokenPattern =
+    /(?:integrated_multimodal_description|overall_soundscape|non_diegetic_music|subject_definitions|summary|retention_analysis|detailed_description):|\[Shot \d+\]|\[[A-Z][A-Za-z-]*\]|<(?:Subject|Picture|Video|Audio) \d+>|<\/?d>|<(?:scenetrans|cutoff)>|\(S\d+(?:,S\d+)*\)|\b\d{2}:\d{2}\.\d{3}\b|\b(?:fully_preserved|partially_preserved|attribute_transfer|weak_reference|fully_copy|partially_copy)\b/g
+  const sourceTokens = new Set(source.match(tokenPattern) ?? [])
+
+  return [...sourceTokens].filter((token) => !translated.includes(token))
+}
+
+function normalizeComparableText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().toLowerCase()
 }
 
 function stripMarkdownFence(content: string): string {

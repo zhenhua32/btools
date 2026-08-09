@@ -198,11 +198,11 @@ function validateForm(): string {
           <NInput
             v-model:value="formState.promptOptimizerSystemPrompt"
             type="textarea"
-            placeholder="用于将用户描述改写为 MiniMax-H3 中英文提示词"
+            placeholder="用于将用户描述改写为 MiniMax-H3 英文正式提示词"
             :autosize="{ minRows: 10, maxRows: 24 }"
           />
           <template #feedback>
-            此提示词会与上方相同的模型配置一起使用，可按需修改；恢复默认可还原内置指南。
+            此提示词用于第一步生成英文 H3 正式提示词；随后会复用 AI 翻译模型生成中文审阅版。可按需修改，恢复默认可还原内置指南。
           </template>
         </NFormItem>
       </NForm>

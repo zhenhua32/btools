@@ -21,7 +21,7 @@ BTools 是一个基于 Vue 3 和 Chrome Extension Manifest V3 的浏览器工具
 	- OpenAI 兼容接口配置
 - AI 提示词优化
 	- 按 MiniMax-H3 官方指南支持 T2VA、I2VA、FL2VA、L2VA 与 Ref2VA
-	- 一次生成结构对应的中文审阅版与英文直用版
+	- 先生成英文 H3 直用版，再复用 AI 翻译模型生成结构对应的中文审阅版
 	- 非 T2VA 模式上传真实参考图片，由视觉模型基于图片内容改写
 
 ## 本地开发
