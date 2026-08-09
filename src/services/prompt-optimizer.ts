@@ -277,13 +277,6 @@ export function parseChineseReviewTranslation(
     throw new Error('翻译模型未返回中文审阅版，请重试')
   }
 
-  const missingStructuralTokens = getMissingStructuralTokens(englishPrompt, chinesePrompt)
-  if (missingStructuralTokens.length > 0) {
-    throw new Error(
-      `翻译模型改动了 H3 结构标记（缺少 ${missingStructuralTokens.slice(0, 3).join('、')}），请重试`,
-    )
-  }
-
   if (!looksLikeChineseTranslation(englishPrompt, chinesePrompt)) {
     throw new Error('翻译模型返回的中文审阅版仍以英文为主，请重试或检查 AI 翻译设置')
   }
@@ -308,14 +301,6 @@ function looksLikeChineseTranslation(source: string, translated: string): boolea
     languageCharacterCount > 0 &&
     chineseCharacterCount / languageCharacterCount >= 0.08
   )
-}
-
-function getMissingStructuralTokens(source: string, translated: string): string[] {
-  const tokenPattern =
-    /(?:integrated_multimodal_description|overall_soundscape|non_diegetic_music|subject_definitions|summary|retention_analysis|detailed_description):|\[Shot \d+\]|\[[A-Z][A-Za-z-]*\]|<(?:Subject|Picture|Video|Audio) \d+>|<\/?d>|<(?:scenetrans|cutoff)>|\(S\d+(?:,S\d+)*\)|\b\d{2}:\d{2}\.\d{3}\b|\b(?:fully_preserved|partially_preserved|attribute_transfer|weak_reference|fully_copy|partially_copy)\b/g
-  const sourceTokens = new Set(source.match(tokenPattern) ?? [])
-
-  return [...sourceTokens].filter((token) => !translated.includes(token))
 }
 
 function normalizeComparableText(text: string): string {

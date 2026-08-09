@@ -57,7 +57,7 @@ describe('MiniMax-H3 prompt optimizer', () => {
     expect(result).toBe('English prompt')
   })
 
-  it('accepts a translated Chinese review and rejects an English duplicate', () => {
+  it('accepts a Chinese review even when the translation changes H3 markers', () => {
     const englishPrompt = 'integrated_multimodal_description:\n[Shot 1] A woman opens the door.'
 
     expect(
@@ -69,12 +69,18 @@ describe('MiniMax-H3 prompt optimizer', () => {
     expect(() => parseChineseReviewTranslation(englishPrompt, englishPrompt)).toThrow(
       '仍以英文为主',
     )
-    expect(() =>
+    expect(
       parseChineseReviewTranslation(
         englishPrompt,
         'integrated_multimodal_description:\n[镜头 1] 一名女子缓缓打开房门，随后走进房间。',
       ),
-    ).toThrow('改动了 H3 结构标记')
+    ).toContain('[镜头 1]')
+    expect(
+      parseChineseReviewTranslation(
+        englishPrompt,
+        '一名女子缓缓打开房门，随后走进房间。',
+      ),
+    ).toBe('一名女子缓缓打开房门，随后走进房间。')
   })
 
   it('builds image_url content for image-based modes', () => {

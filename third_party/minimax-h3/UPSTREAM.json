@@ -1,0 +1,17 @@
+{
+    "repository":  "https://huggingface.co/MiniMaxAI/MiniMax-H3",
+    "revision":  "bfc8ed0353f5a9733be73e6b2c98ec0948195b86",
+    "files":  [
+                  {
+                      "path":  "docs/VIDEO_PROMPT_WRITING_GUIDE_base_en.md",
+                      "sha256":  "2cfebc096a6e08370f288d468d90b60f7f9bcb938f94bf090816e910e48e75fc",
+                      "size":  15773
+                  },
+                  {
+                      "path":  "docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md",
+                      "sha256":  "1e574f356716ad55612247ffb7bbccbcdb484ad96599d63c7dca1af186b1fab7",
+                      "size":  23553
+                  }
+              ],
+    "license":  "LICENSE"
+}
