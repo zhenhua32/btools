@@ -4,6 +4,8 @@
 import { getAiSettings, getMissingAiSettingLabels } from '@/services/ai-settings'
 import { translateTextWithAi } from '@/services/ai-translator'
 import { requestChatCompletion, resolveChatEndpoint } from '@/services/ai-api'
+import { handleReadAloudPort } from './read-aloud'
+import { READ_ALOUD_PORT_NAME } from '@/services/read-aloud-types'
 import {
   PAGE_TRANSLATE_STATUS_MESSAGE_TYPE,
   type AiProxyReply,
@@ -18,6 +20,7 @@ import {
 
 const PAGE_TRANSLATE_MENU_ID = 'btools:page-translate'
 const PAGE_TRANSLATE_SELECTION_MENU_ID = 'btools:page-translate-selection'
+const READ_ALOUD_SELECTION_MENU_ID = 'btools:read-aloud-selection'
 const PAGE_TRANSLATE_URL_PATTERNS = ['http://*/*', 'https://*/*', 'file:///*']
 const activePageTranslationRequests = new Map<number, string>()
 
@@ -45,6 +48,25 @@ chrome.runtime.onStartup.addListener(() => {
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (tab?.id === undefined) {
+    return
+  }
+
+  if (info.menuItemId === READ_ALOUD_SELECTION_MENU_ID) {
+    try {
+      await ensurePageTranslateContentScript(tab.id)
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (text: string) => {
+          const scope = globalThis as typeof globalThis & {
+            __btoolsReadAloudSelectionStart?: (text?: string) => void
+          }
+          scope.__btoolsReadAloudSelectionStart?.(text)
+        },
+        args: [info.selectionText ?? ''],
+      })
+    } catch {
+      // 页面刷新、关闭或未授予文件访问权限时无法启动朗读。
+    }
     return
   }
 
@@ -133,6 +155,10 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 })
 
 chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === READ_ALOUD_PORT_NAME) {
+    handleReadAloudPort(port)
+    return
+  }
   if (port.name.startsWith('btools-ai-stream-')) {
     port.onMessage.addListener(async (msg: any) => {
       if (isAiProxyRequestMessage(msg)) {
@@ -308,6 +334,18 @@ async function handleTranslationRequest(
 }
 
 function ensurePageTranslateContextMenu(): void {
+  chrome.contextMenus.remove(READ_ALOUD_SELECTION_MENU_ID, () => {
+    void chrome.runtime.lastError
+    chrome.contextMenus.create({
+      id: READ_ALOUD_SELECTION_MENU_ID,
+      title: '用 BTools AI 朗读选中文本',
+      contexts: ['selection'],
+      documentUrlPatterns: PAGE_TRANSLATE_URL_PATTERNS,
+    }, () => {
+      void chrome.runtime.lastError
+    })
+  })
+
   chrome.contextMenus.remove(PAGE_TRANSLATE_MENU_ID, () => {
     void chrome.runtime.lastError
 

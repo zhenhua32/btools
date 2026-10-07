@@ -26,6 +26,10 @@ export interface AiSettings {
   baseUrl: string
   apiKey: string
   model: string
+  ttsBaseUrl: string
+  ttsApiKey: string
+  ttsModel: string
+  ttsVoiceDescription: string
   systemPrompt: string
   promptOptimizerSystemPrompt: string
   defaultTargetLanguage: string
@@ -34,6 +38,7 @@ export interface AiSettings {
   concurrencyLimit: number
   requestTimeoutMs: number
   enableSelectionButton: boolean
+  enableSelectionReadAloudButton: boolean
   enableCtrlSelection: boolean
   enableStreaming: boolean
 }
@@ -158,6 +163,10 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   baseUrl: 'https://api.openai.com/v1',
   apiKey: '',
   model: '',
+  ttsBaseUrl: 'https://api.xiaomimimo.com/v1',
+  ttsApiKey: '',
+  ttsModel: 'mimo-v2.5-tts-voicedesign',
+  ttsVoiceDescription: '性感御姐音色',
   systemPrompt: '你是一名专业翻译助手，请忠实翻译文本并保留原有格式。',
   promptOptimizerSystemPrompt: DEFAULT_PROMPT_OPTIMIZER_SYSTEM_PROMPT,
   defaultTargetLanguage: '中文',
@@ -166,6 +175,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   concurrencyLimit: 3,
   requestTimeoutMs: 300000,
   enableSelectionButton: true,
+  enableSelectionReadAloudButton: true,
   enableCtrlSelection: true,
   enableStreaming: true,
 }
@@ -207,6 +217,11 @@ export function normalizeAiSettings(input?: Partial<AiSettings> | null): AiSetti
     baseUrl: input?.baseUrl?.trim() || DEFAULT_AI_SETTINGS.baseUrl,
     apiKey: input?.apiKey?.trim() || '',
     model: input?.model?.trim() || '',
+    ttsBaseUrl: input?.ttsBaseUrl?.trim() || DEFAULT_AI_SETTINGS.ttsBaseUrl,
+    ttsApiKey: input?.ttsApiKey?.trim() || '',
+    ttsModel: input?.ttsModel?.trim() || DEFAULT_AI_SETTINGS.ttsModel,
+    ttsVoiceDescription:
+      input?.ttsVoiceDescription?.trim() || DEFAULT_AI_SETTINGS.ttsVoiceDescription,
     systemPrompt: input?.systemPrompt?.trim() || DEFAULT_AI_SETTINGS.systemPrompt,
     promptOptimizerSystemPrompt:
       input?.promptOptimizerSystemPrompt?.trim() ||
@@ -224,6 +239,8 @@ export function normalizeAiSettings(input?: Partial<AiSettings> | null): AiSetti
         : DEFAULT_AI_SETTINGS.requestTimeoutMs,
     defaultTranslationStrategy,
     enableSelectionButton: input?.enableSelectionButton ?? DEFAULT_AI_SETTINGS.enableSelectionButton,
+    enableSelectionReadAloudButton:
+      input?.enableSelectionReadAloudButton ?? DEFAULT_AI_SETTINGS.enableSelectionReadAloudButton,
     enableCtrlSelection: input?.enableCtrlSelection ?? DEFAULT_AI_SETTINGS.enableCtrlSelection,
     enableStreaming: input?.enableStreaming ?? DEFAULT_AI_SETTINGS.enableStreaming,
   }

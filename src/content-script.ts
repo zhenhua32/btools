@@ -8,6 +8,7 @@ import {
   type SelectionTranslationSnapshot,
 } from '@/services/selection-translate'
 import { getAiSettings } from '@/services/ai-settings'
+import { createPageReadAloudController } from '@/services/read-aloud-overlay'
 import {
   PAGE_TRANSLATE_SELECTION_SUBMIT_MESSAGE_TYPE,
   PAGE_TRANSLATE_SUBMIT_MESSAGE_TYPE,
@@ -43,6 +44,8 @@ const globalScope = globalThis as typeof globalThis & {
   __btoolsPageTranslateState?: PageTranslateRuntimeState
   __btoolsPageTranslateStart?: (requestId: string) => void
   __btoolsPageTranslateSelectionStart?: (requestId: string) => void
+  __btoolsReadAloudSelectionStart?: (text?: string) => void
+  __btoolsReadAloudController?: ReturnType<typeof createPageReadAloudController>
 }
 
 if (!globalScope.__btoolsPageTranslateState) {
@@ -61,6 +64,11 @@ if (!globalScope.__btoolsPageTranslateState) {
 }
 
 const runtimeState = globalScope.__btoolsPageTranslateState
+const readAloudController = globalScope.__btoolsReadAloudController ??= createPageReadAloudController()
+
+globalScope.__btoolsReadAloudSelectionStart = (text?: string) => {
+  readAloudController.start(text?.trim() || window.getSelection()?.toString().trim() || '')
+}
 
 globalScope.__btoolsPageTranslateStart = (requestId: string) => {
   runtimeState.activeRequestId = requestId
@@ -102,7 +110,6 @@ if (!globalScope.__btoolsPageTranslateInitialized) {
 
     const selection = window.getSelection()
     const text = selection?.toString().trim()
-    console.log('[BTools] mouseup', { text, ctrlKey: event.ctrlKey, metaKey: event.metaKey })
 
     if (!text || selection?.isCollapsed) {
       hideSelectionFloatButton()
@@ -110,7 +117,7 @@ if (!globalScope.__btoolsPageTranslateInitialized) {
     }
 
     const settings = await getAiSettings()
-    console.log('[BTools] settings', { enableCtrlSelection: settings.enableCtrlSelection, enableSelectionButton: settings.enableSelectionButton })
+    if (window.getSelection()?.toString().trim() !== text) return
 
     // 若配置开启且按住了 CTRL/CMD 键，则直接翻译
     if (settings.enableCtrlSelection && (event.ctrlKey || event.metaKey)) {
@@ -121,10 +128,15 @@ if (!globalScope.__btoolsPageTranslateInitialized) {
     }
 
     // 若配置开启，显示悬浮按钮
-    if (settings.enableSelectionButton) {
-      showSelectionFloatButton(event, () => {
-        const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-        globalScope.__btoolsPageTranslateSelectionStart?.(requestId)
+    if (settings.enableSelectionButton || settings.enableSelectionReadAloudButton) {
+      showSelectionFloatButton(event, {
+        translate: settings.enableSelectionButton ? () => {
+          const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+          globalScope.__btoolsPageTranslateSelectionStart?.(requestId)
+        } : undefined,
+        readAloud: settings.enableSelectionReadAloudButton ? () => {
+          globalScope.__btoolsReadAloudSelectionStart?.(text)
+        } : undefined,
       })
     } else {
       hideSelectionFloatButton()
@@ -157,7 +169,7 @@ function getOrCreateFloatButton(): HTMLElement {
     :host {
       all: initial;
     }
-    .selection-btn {
+    .selection-actions {
       position: absolute;
       z-index: 2147483647;
       display: none;
@@ -165,8 +177,8 @@ function getOrCreateFloatButton(): HTMLElement {
       justify-content: center;
       background: #0ea5e9;
       color: #fff;
-      font-size: 13px;
-      padding: 4px 10px;
+      gap: 2px;
+      padding: 3px;
       border-radius: 6px;
       cursor: pointer;
       box-shadow: 0 4px 12px rgba(14, 165, 233, 0.4);
@@ -174,11 +186,14 @@ function getOrCreateFloatButton(): HTMLElement {
       transition: all 0.2s ease-out;
       font-family: system-ui, -apple-system, sans-serif;
     }
-    .selection-btn:hover {
-      background: #0284c7;
-      transform: translateY(-1px);
+    .selection-btn {
+      display: flex; align-items: center; border: 0; border-radius: 4px;
+      background: transparent; color: inherit; padding: 4px 8px;
+      font: inherit; font-size: 13px; cursor: pointer;
     }
-    .selection-btn.visible {
+    .selection-btn:hover { background: #0284c7; }
+    .selection-btn[hidden] { display: none; }
+    .selection-actions.visible {
       display: flex;
     }
     .icon {
@@ -189,15 +204,27 @@ function getOrCreateFloatButton(): HTMLElement {
     }
   `
 
-  const btn = document.createElement('div')
-  btn.className = 'selection-btn'
+  const actions = document.createElement('div')
+  actions.className = 'selection-actions'
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'selection-btn translate-btn'
   btn.innerHTML = `
     <svg class="icon" viewBox="0 0 24 24"><path d="M12.87 15.07l-2.54-2.51.03-.03A17.52 17.52 0 0 0 14.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04M18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12m-2.62 7l1.62-4.33L19.12 17h-3.24Z"/></svg>
     翻译
 `
+  const readButton = document.createElement('button')
+  readButton.type = 'button'
+  readButton.className = 'selection-btn read-aloud-btn'
+  readButton.textContent = '朗读'
+  actions.append(btn, readButton)
+  actions.addEventListener('mousedown', (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+  })
 
   shadowRoot.appendChild(style)
-  shadowRoot.appendChild(btn)
+  shadowRoot.appendChild(actions)
   
   if (document.body) {
     document.body.appendChild(floatButtonHost)
@@ -208,12 +235,13 @@ function getOrCreateFloatButton(): HTMLElement {
   return floatButtonHost
 }
 
-let onFloatButtonClick: ((e: Event) => void) | null = null
-
-function showSelectionFloatButton(event: MouseEvent, onClick: () => void) {
+function showSelectionFloatButton(event: MouseEvent, callbacks: {
+  translate?: () => void
+  readAloud?: () => void
+}) {
   const host = getOrCreateFloatButton()
-  const btn = host.shadowRoot?.querySelector('.selection-btn') as HTMLElement
-  if (!btn) return
+  const actions = host.shadowRoot?.querySelector('.selection-actions') as HTMLElement
+  if (!actions) return
 
   // 计算位置：鼠标正下方一点点，防止挡住选区
   const selection = window.getSelection()
@@ -226,31 +254,29 @@ function showSelectionFloatButton(event: MouseEvent, onClick: () => void) {
   const top = window.scrollY + Math.max(event.clientY + 12, rect.bottom + 8)
   const left = window.scrollX + event.clientX
 
-  btn.style.top = `${top}px`
-  btn.style.left = `${left}px`
-  btn.classList.add('visible')
+  actions.style.top = `${top}px`
+  actions.style.left = `${left}px`
+  actions.classList.add('visible')
 
-  onFloatButtonClick = (e: Event) => {
-    e.preventDefault()
-    e.stopPropagation()
-    hideSelectionFloatButton()
-    onClick()
+  for (const [selector, callback] of [
+    ['.translate-btn', callbacks.translate],
+    ['.read-aloud-btn', callbacks.readAloud],
+  ] as const) {
+    const button = host.shadowRoot?.querySelector<HTMLButtonElement>(selector)
+    if (!button) continue
+    button.hidden = !callback
+    button.onclick = callback ? (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      hideSelectionFloatButton()
+      callback()
+    } : null
   }
-  
-  btn.onmousedown = (e) => e.stopPropagation() // 防止触发全局 mousedown 而自己消失
-  btn.onclick = onFloatButtonClick
 }
 
 function hideSelectionFloatButton() {
   if (!floatButtonHost) return
-  const btn = floatButtonHost.shadowRoot?.querySelector('.selection-btn')
-  if (btn) {
-    btn.classList.remove('visible')
-    if (onFloatButtonClick) {
-      btn.removeEventListener('click', onFloatButtonClick)
-      onFloatButtonClick = null
-    }
-  }
+  floatButtonHost.shadowRoot?.querySelector('.selection-actions')?.classList.remove('visible')
 }
 
 async function beginPageTranslation(

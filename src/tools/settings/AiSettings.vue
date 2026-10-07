@@ -92,22 +92,20 @@ function syncForm(settings: AiSettings) {
 }
 
 function validateForm(): string {
-  if (!formState.baseUrl.trim()) {
-    return '请填写 OpenAI 兼容接口地址'
-  }
+  for (const [label, value] of [
+    ['翻译接口地址', formState.baseUrl],
+    ['朗读接口地址', formState.ttsBaseUrl],
+  ]) {
+    if (!value?.trim()) continue
 
-  try {
-    new URL(formState.baseUrl.trim())
-  } catch {
-    return '接口地址格式不正确，请输入完整 URL'
-  }
-
-  if (!formState.apiKey.trim()) {
-    return '请填写 API Key'
-  }
-
-  if (!formState.model.trim()) {
-    return '请填写模型名称'
+    try {
+      const url = new URL(value.trim())
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+        return `${label}需要使用 HTTP 或 HTTPS`
+      }
+    } catch {
+      return `${label}格式不正确，请输入完整 URL`
+    }
   }
 
   if (!formState.promptOptimizerSystemPrompt.trim()) {
@@ -132,7 +130,7 @@ function validateForm(): string {
       <NSpace align="center" justify="space-between">
         <div>
           <NText strong>AI 设置</NText>
-          <div class="toolbar-desc">使用 OpenAI 兼容接口，配置会保存在当前浏览器本地。</div>
+          <div class="toolbar-desc">翻译与朗读可分别配置接口，配置会保存在当前浏览器本地。</div>
         </div>
         <NSpace>
           <NButton size="small" :loading="loading" @click="loadStoredSettings">重新加载</NButton>
@@ -156,7 +154,7 @@ function validateForm(): string {
       {{ successMsg }}
     </NAlert>
 
-    <NCard size="small" title="模型配置">
+    <NCard size="small" title="翻译 / 文本模型配置">
       <NForm label-placement="top">
         <NFormItem label="Base URL / 接口地址">
           <NInput
@@ -188,6 +186,48 @@ function validateForm(): string {
             placeholder="给模型的固定上下文提示词"
             :autosize="{ minRows: 4, maxRows: 8 }"
           />
+        </NFormItem>
+      </NForm>
+    </NCard>
+
+    <NCard size="small" title="朗读 / 音色设计" class="settings-section">
+      <NForm label-placement="top">
+        <NFormItem label="朗读 Base URL / 接口地址">
+          <NInput
+            v-model:value="formState.ttsBaseUrl"
+            placeholder="https://api.xiaomimimo.com/v1"
+          />
+        </NFormItem>
+
+        <NFormItem label="朗读 API Key">
+          <NInput
+            v-model:value="formState.ttsApiKey"
+            type="password"
+            placeholder="输入 MiMo 语音接口的 API Key"
+            show-password-on="mousedown"
+          />
+          <template #feedback>
+            朗读使用独立的 API Key；仅使用朗读时无需填写翻译模型配置。
+          </template>
+        </NFormItem>
+
+        <NFormItem label="朗读 Model / 模型名称">
+          <NInput
+            v-model:value="formState.ttsModel"
+            placeholder="mimo-v2.5-tts-voicedesign"
+          />
+        </NFormItem>
+
+        <NFormItem label="音色描述">
+          <NInput
+            v-model:value="formState.ttsVoiceDescription"
+            type="textarea"
+            placeholder="例如：性感御姐音色"
+            :autosize="{ minRows: 3, maxRows: 8 }"
+          />
+          <template #feedback>
+            描述声音的性别、音高、情绪与说话方式，默认“性感御姐音色”。VoiceDesign 按短句生成并连续播放，首段完成后即可开始朗读；该模型暂不提供实时音频分片，逐段音色可能略有变化。可随时停止。
+          </template>
         </NFormItem>
       </NForm>
     </NCard>
@@ -257,8 +297,12 @@ function validateForm(): string {
         <NFormItem label="启用选中文本后的悬浮翻译按钮">
           <NSwitch v-model:value="formState.enableSelectionButton" />
           <template #feedback>
-            翻译本地 HTML 文件时，请先在浏览器扩展管理页的 BTools 详情中开启“允许访问文件网址”，然后刷新本地页面。
+            翻译或朗读本地 HTML 文件时，请先在浏览器扩展管理页的 BTools 详情中开启“允许访问文件网址”，然后刷新本地页面。
           </template>
+        </NFormItem>
+
+        <NFormItem label="启用选中文本后的悬浮朗读按钮">
+          <NSwitch v-model:value="formState.enableSelectionReadAloudButton" />
         </NFormItem>
 
         <NFormItem label="划选文本时按住 Ctrl 或 Command 键直接触发翻译">

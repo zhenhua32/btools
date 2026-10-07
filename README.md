@@ -1,6 +1,6 @@
 # 浏览器工具集
 
-BTools 是一个基于 Vue 3 和 Chrome Extension Manifest V3 的浏览器工具集，当前包含文本处理、计算、书签处理和 AI 翻译等工具。
+BTools 是一个基于 Vue 3 和 Chrome Extension Manifest V3 的浏览器工具集，当前包含文本处理、计算、书签处理、AI 翻译和 AI 朗读等工具。
 
 ## 当前功能
 
@@ -19,6 +19,10 @@ BTools 是一个基于 Vue 3 和 Chrome Extension Manifest V3 的浏览器工具
 	- 段落流结果展示
 	- 左右对照翻译
 	- OpenAI 兼容接口配置
+- AI 朗读
+	- 工具内文本朗读、网页划词朗读和右键朗读
+	- MiMo 音色描述配置，默认“性感御姐音色”
+	- 按短句生成并连续播放，支持随时停止
 - AI 提示词优化
 	- 按 MiniMax-H3 官方指南支持 T2VA、I2VA、FL2VA、L2VA 与 Ref2VA
 	- 先生成英文 H3 直用版，再复用 AI 翻译模型生成结构对应的中文审阅版
@@ -49,6 +53,14 @@ npm run test
 5. 网页划词翻译和右键翻译支持 HTTP/HTTPS 网页（含 localhost）以及直接打开的本地 HTML 文件（`file://`）。
 6. 使用本地 HTML 文件翻译前，在 `chrome://extensions`（Edge 为 `edge://extensions`）中打开 BTools 的“详情”，开启“允许访问文件网址”，并刷新本地网页；“AI 设置”中的“启用选中文本后的悬浮翻译按钮”也需要开启。
 7. 更新扩展后，先在扩展管理页重新加载 BTools，再刷新需要翻译的网页。
+
+## AI 朗读说明
+
+1. 打开“AI 设置”中的“朗读 / 音色设计”，填写独立的朗读 API Key。默认 Base URL 为 `https://api.xiaomimimo.com/v1`，模型为 `mimo-v2.5-tts-voicedesign`，音色描述为“性感御姐音色”；音色描述可自行修改。仅使用朗读时无需配置翻译 API Key 和模型。
+2. 在“AI 朗读”工具中输入文本后开始朗读，或在网页选中文本后点击悬浮朗读按钮，也可使用右键菜单中的朗读操作。“AI 设置”可单独开关悬浮朗读按钮。
+3. VoiceDesign 暂不支持实时音频分片。BTools 按短句生成音频并连续播放，首段完成后开始朗读，后续段落继续生成；分段音色可能略有变化。具体能力见 [MiMo 语音合成指南](https://mimo.mi.com/docs/en-US/quick-start/usage-guide/audio/speech-synthesis-v2.5)。
+4. 点击停止按钮可停止当前朗读并取消后续生成。API Key 与音色配置保存在当前浏览器本地，朗读请求通过扩展后台发送。
+5. 划词朗读与右键朗读支持 HTTP/HTTPS 网页（含 localhost）和本地 HTML 文件（`file://`）。本地文件需要在扩展详情中开启“允许访问文件网址”，重新加载扩展后刷新网页。
 
 ## AI 提示词优化说明
 
