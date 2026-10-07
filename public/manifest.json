@@ -15,11 +15,11 @@
     "service_worker": "service-worker.js",
     "type": "module"
   },
-  "host_permissions": ["https://*/*", "http://*/*"],
+  "host_permissions": ["https://*/*", "http://*/*", "file:///*"],
   "permissions": ["storage", "bookmarks", "contextMenus", "scripting"],
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
+      "matches": ["http://*/*", "https://*/*", "file:///*"],
       "js": ["content-script.js"],
       "run_at": "document_idle"
     }

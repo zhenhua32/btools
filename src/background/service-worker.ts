@@ -18,6 +18,7 @@ import {
 
 const PAGE_TRANSLATE_MENU_ID = 'btools:page-translate'
 const PAGE_TRANSLATE_SELECTION_MENU_ID = 'btools:page-translate-selection'
+const PAGE_TRANSLATE_URL_PATTERNS = ['http://*/*', 'https://*/*', 'file:///*']
 const activePageTranslationRequests = new Map<number, string>()
 
 chrome.action.onClicked.addListener(() => {
@@ -315,7 +316,7 @@ function ensurePageTranslateContextMenu(): void {
         id: PAGE_TRANSLATE_MENU_ID,
         title: '用 BTools AI 翻译全文',
         contexts: ['all'],
-        documentUrlPatterns: ['http://*/*', 'https://*/*'],
+        documentUrlPatterns: PAGE_TRANSLATE_URL_PATTERNS,
       },
       () => {
         void chrome.runtime.lastError
@@ -331,7 +332,7 @@ function ensurePageTranslateContextMenu(): void {
         id: PAGE_TRANSLATE_SELECTION_MENU_ID,
         title: '用 BTools AI 翻译选中文本',
         contexts: ['selection'],
-        documentUrlPatterns: ['http://*/*', 'https://*/*'],
+        documentUrlPatterns: PAGE_TRANSLATE_URL_PATTERNS,
       },
       () => {
         void chrome.runtime.lastError

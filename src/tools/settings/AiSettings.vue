@@ -256,6 +256,9 @@ function validateForm(): string {
 
         <NFormItem label="启用选中文本后的悬浮翻译按钮">
           <NSwitch v-model:value="formState.enableSelectionButton" />
+          <template #feedback>
+            翻译本地 HTML 文件时，请先在浏览器扩展管理页的 BTools 详情中开启“允许访问文件网址”，然后刷新本地页面。
+          </template>
         </NFormItem>
 
         <NFormItem label="划选文本时按住 Ctrl 或 Command 键直接触发翻译">

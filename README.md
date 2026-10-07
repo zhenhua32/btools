@@ -46,6 +46,9 @@ npm run test
 2. AI 配置保存在当前浏览器本地，不会写入项目文件。
 3. AI 翻译通过扩展后台代理调用 OpenAI 兼容 chat/completions 接口。
 4. 为支持自定义兼容接口，扩展清单增加了较宽的网络访问权限。
+5. 网页划词翻译和右键翻译支持 HTTP/HTTPS 网页（含 localhost）以及直接打开的本地 HTML 文件（`file://`）。
+6. 使用本地 HTML 文件翻译前，在 `chrome://extensions`（Edge 为 `edge://extensions`）中打开 BTools 的“详情”，开启“允许访问文件网址”，并刷新本地网页；“AI 设置”中的“启用选中文本后的悬浮翻译按钮”也需要开启。
+7. 更新扩展后，先在扩展管理页重新加载 BTools，再刷新需要翻译的网页。
 
 ## AI 提示词优化说明
 
