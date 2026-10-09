@@ -1,6 +1,7 @@
 import { getAiSettings } from './ai-settings'
 import { streamReadAloud } from './read-aloud-api'
 import { ReadAloudPlayer } from './read-aloud-player'
+import { getReadAloudVoiceReferences } from './read-aloud-voice-reference'
 import { READ_ALOUD_PORT_NAME, type ReadAloudServerMessage } from './read-aloud-types'
 
 export type ReadAloudStatus = 'loading' | 'playing' | 'blocked' | 'finished'
@@ -98,11 +99,15 @@ export function createReadAloudSession(text: string, callbacks: ReadAloudCallbac
         catch { fail('朗读连接已断开，请刷新页面后重试') }
       }, 20000)
     } else {
-      void getAiSettings().then((settings) => {
+      void getAiSettings().then(async (settings) => {
+        if (stopped) return
+        const reference = settings.ttsModel.toLowerCase().includes('voiceclone')
+          ? await getReadAloudVoiceReferences()
+          : null
         if (stopped) return
         return streamReadAloud(text.trim(), settings, (chunk) => {
           if (!stopped) return player?.addChunk(chunk)
-        }, controller.signal)
+        }, controller.signal, reference)
       }).then(() => {
         if (!stopped) done()
       }).catch((error: unknown) => {

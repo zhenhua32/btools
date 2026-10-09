@@ -1,22 +1,33 @@
 import { resolveChatEndpoint } from './ai-api'
 import { normalizeAiSettings, type AiSettings } from './ai-types'
 import { MAX_READ_ALOUD_TEXT_LENGTH, type ReadAloudAudioChunk } from './read-aloud-types'
+import { splitReadAloudLanguageRuns } from './read-aloud-language'
+import {
+  validateReadAloudVoiceReference,
+  type ReadAloudVoiceReference,
+  type ReadAloudVoiceReferences,
+} from './read-aloud-voice-reference'
 
 const MIMO_SAMPLE_RATE = 24000
 
 /**
- * VoiceDesign currently returns one audio result per inference, even with stream=true.
+ * VoiceDesign and VoiceClone use compatibility streaming, returning full inference results.
  * Short sentence-aware requests let its first audio play while later text is generated.
  * Official protocol: https://mimo.mi.com/docs/en-US/quick-start/usage-guide/audio/speech-synthesis-v2.5
  */
-export function splitReadAloudText(text: string, model: string): string[] {
-  const characters = Array.from(text.trim())
-  const voiceDesign = model.toLowerCase().includes('voicedesign')
+export function splitReadAloudText(
+  text: string,
+  model: string,
+  options: { firstSegment?: boolean; preserveWhitespace?: boolean } = {},
+): string[] {
+  const characters = Array.from(options.preserveWhitespace ? text : text.trim())
+  const shortSegments = /voicedesign|voiceclone/u.test(model.toLowerCase())
   const segments: string[] = []
   let offset = 0
+  let leadingWhitespace = ''
 
   while (offset < characters.length) {
-    const targetLength = voiceDesign ? (segments.length === 0 ? 80 : 260) : 1200
+    const targetLength = shortSegments ? (options.firstSegment !== false && segments.length === 0 ? 80 : 260) : 1200
     const limit = Math.min(offset + targetLength, characters.length)
     let end = limit
 
@@ -37,8 +48,17 @@ export function splitReadAloudText(text: string, model: string): string[] {
       else if (sentenceBoundary > offset) end = sentenceBoundary
     }
 
-    const segment = characters.slice(offset, end).join('').trim()
-    if (segment) segments.push(segment)
+    const rawSegment = characters.slice(offset, end).join('')
+    const segment = options.preserveWhitespace ? rawSegment : rawSegment.trim()
+    if (options.preserveWhitespace && !segment.trim()) {
+      // Whitespace must stay in order, but a whitespace-only inference can return
+      // no audio and stop the whole reading. Attach it to substantive text instead.
+      if (segments.length) segments[segments.length - 1] += segment
+      else leadingWhitespace += segment
+    } else if (segment) {
+      segments.push(leadingWhitespace + segment)
+      leadingWhitespace = ''
+    }
     offset = end
   }
 
@@ -50,6 +70,7 @@ export async function streamReadAloud(
   inputSettings: AiSettings,
   onChunk: (chunk: ReadAloudAudioChunk) => void | Promise<void>,
   signal?: AbortSignal,
+  reference?: ReadAloudVoiceReference | ReadAloudVoiceReferences | null,
 ): Promise<void> {
   throwIfAborted(signal)
   const settings = normalizeAiSettings(inputSettings)
@@ -58,14 +79,57 @@ export async function streamReadAloud(
     throw new Error(`朗读文字过长，请每次选择不超过 ${MAX_READ_ALOUD_TEXT_LENGTH} 个字符`)
   }
   if (!settings.ttsApiKey) throw new Error('请先在 AI 设置中配置朗读 API Key')
+  let referenceDataUrls: string[] = []
+  const segments: { text: string; voiceDescription: string; referenceDataUrl?: string }[] = []
+  if (settings.ttsModel.toLowerCase().includes('voiceclone')) {
+    if (!reference) throw new Error('请先在 AI 设置中添加 VoiceClone 参考音频')
+    // Validate every supplied reference and snapshot the routing plan before any
+    // network request. Changes to settings or references cannot affect later parts.
+    const references = snapshotVoiceReferences(reference)
+    referenceDataUrls = Object.values(references).flatMap((voice) => voice ? [voice.dataUrl] : [])
+    const defaultLanguage = references.en && !references.zh && !references.default ? 'en' : 'zh'
+    const runs = splitReadAloudLanguageRuns(text, defaultLanguage)
+    const missingLanguages = [...new Set(runs
+      .filter((run) => !references[run.language] && !references.default)
+      .map((run) => run.language === 'zh' ? '中文' : '英文'))]
+    if (missingLanguages.length) {
+      throw new Error(`请先在 AI 设置中添加 ${missingLanguages.join('、')} VoiceClone 参考音频，或配置通用参考音频`)
+    }
+    for (const run of runs) {
+      const voice = references[run.language] ?? references.default!
+      const voiceDescription = (run.language === 'zh'
+        ? settings.ttsChineseVoiceDescription
+        : settings.ttsEnglishVoiceDescription) || settings.ttsVoiceDescription
+      for (const segment of splitReadAloudText(run.text, settings.ttsModel, {
+        firstSegment: segments.length === 0,
+        preserveWhitespace: true,
+      })) {
+        segments.push({ text: segment, voiceDescription, referenceDataUrl: voice.dataUrl })
+      }
+    }
+  } else {
+    segments.push(...splitReadAloudText(text, settings.ttsModel).map((segment) => ({
+      text: segment, voiceDescription: settings.ttsVoiceDescription,
+    })))
+  }
   const endpoint = resolveChatEndpoint(settings.ttsBaseUrl)
   if (!/^https?:$/u.test(new URL(endpoint).protocol)) {
     throw new Error('朗读 API 地址必须使用 HTTP 或 HTTPS')
   }
 
-  for (const segment of splitReadAloudText(text, settings.ttsModel)) {
+  for (const segment of segments) {
     throwIfAborted(signal)
-    await requestReadAloudSegment(endpoint, segment, settings, onChunk, signal)
+    await requestReadAloudSegment(endpoint, segment.text, settings, onChunk, signal,
+      segment.referenceDataUrl, segment.voiceDescription, referenceDataUrls)
+  }
+}
+
+function snapshotVoiceReferences(reference: ReadAloudVoiceReference | ReadAloudVoiceReferences): ReadAloudVoiceReferences {
+  const supplied = 'dataUrl' in reference ? { default: reference, zh: null, en: null } : reference
+  return {
+    default: supplied.default == null ? null : validateReadAloudVoiceReference(supplied.default),
+    zh: supplied.zh == null ? null : validateReadAloudVoiceReference(supplied.zh),
+    en: supplied.en == null ? null : validateReadAloudVoiceReference(supplied.en),
   }
 }
 
@@ -75,6 +139,9 @@ async function requestReadAloudSegment(
   settings: AiSettings,
   onChunk: (chunk: ReadAloudAudioChunk) => void | Promise<void>,
   signal?: AbortSignal,
+  referenceDataUrl?: string,
+  voiceDescription = settings.ttsVoiceDescription,
+  referenceDataUrls: readonly string[] = [],
 ): Promise<void> {
   const controller = new AbortController()
   let timedOut = false
@@ -102,12 +169,14 @@ async function requestReadAloudSegment(
       body: JSON.stringify({
         model: settings.ttsModel,
         messages: [
-          { role: 'user', content: settings.ttsVoiceDescription },
+          { role: 'user', content: voiceDescription },
           { role: 'assistant', content: text },
         ],
         audio: {
           format: 'pcm16',
-          ...(settings.ttsModel === 'mimo-v2.5-tts'
+          ...(referenceDataUrl
+            ? { voice: referenceDataUrl }
+            : settings.ttsModel === 'mimo-v2.5-tts'
             ? { voice: 'mimo_default' }
             : { optimize_text_preview: false }),
         },
@@ -151,7 +220,7 @@ async function requestReadAloudSegment(
   } catch (error) {
     if (timedOut) throw new Error('朗读请求超时，请稍后重试')
     if (signal?.aborted || controller.signal.aborted) throw createAbortError()
-    throw error
+    throw new Error(sanitizeReadAloudError(error, settings.ttsApiKey, referenceDataUrls))
   } finally {
     clearTimeout(timeoutId)
     signal?.removeEventListener('abort', abortRequest)
@@ -281,7 +350,7 @@ async function parseResponseBody(response: Response): Promise<unknown> {
 }
 
 function getProviderError(payload: unknown): string | null {
-  if (typeof payload === 'string') return payload.trim().slice(0, 500) || null
+  if (typeof payload === 'string') return payload.trim() || null
   if (!payload || typeof payload !== 'object') return null
   if ('error' in payload) {
     if (typeof payload.error === 'string') return payload.error
@@ -292,6 +361,20 @@ function getProviderError(payload: unknown): string | null {
   }
   if ('message' in payload && typeof payload.message === 'string') return payload.message
   return null
+}
+
+function sanitizeReadAloudError(error: unknown, apiKey: string, referenceDataUrls: readonly string[]): string {
+  let message = error instanceof Error ? error.message : typeof error === 'string' ? error : '朗读生成失败，请稍后重试'
+  // Provider errors can echo the request. Sanitize before truncating so a long
+  // reference or credential cannot survive as a partially exposed prefix.
+  for (const referenceDataUrl of [...referenceDataUrls].sort((a, b) => b.length - a.length)) {
+    message = message.split(referenceDataUrl).join('[参考音频已隐藏]')
+    const encodedAudio = referenceDataUrl.slice(referenceDataUrl.indexOf(',') + 1)
+    if (encodedAudio) message = message.split(encodedAudio).join('[参考音频已隐藏]')
+  }
+  message = message.replace(/data:audio\/(?:wav|mpeg|mp3);base64,[A-Za-z0-9+/]*={0,2}/giu, '[参考音频已隐藏]')
+  if (apiKey) message = message.split(apiKey).join('[API Key 已隐藏]')
+  return message.trim().slice(0, 500) || '朗读生成失败，请稍后重试'
 }
 
 function createAbortError(): DOMException {

@@ -21,6 +21,8 @@ describe('AI read aloud settings migration', () => {
       ttsApiKey: '',
       ttsModel: 'mimo-v2.5-tts-voicedesign',
       ttsVoiceDescription: '性感御姐音色',
+      ttsChineseVoiceDescription: '',
+      ttsEnglishVoiceDescription: '',
       enableSelectionReadAloudButton: true,
     })
   })
@@ -62,6 +64,21 @@ describe('AI read aloud settings migration', () => {
     })).toMatchObject({
       enableSelectionButton: true,
       enableSelectionReadAloudButton: false,
+    })
+  })
+
+  it('keeps legacy voice styles and trims optional language overrides without filling blank overrides', () => {
+    expect(normalizeAiSettings({ ttsVoiceDescription: '保留原声，自然朗读' })).toMatchObject({
+      ttsVoiceDescription: '保留原声，自然朗读',
+      ttsChineseVoiceDescription: '',
+      ttsEnglishVoiceDescription: '',
+    })
+    expect(normalizeAiSettings({
+      ttsChineseVoiceDescription: ' 中文清晰含笑 ',
+      ttsEnglishVoiceDescription: '   ',
+    })).toMatchObject({
+      ttsChineseVoiceDescription: '中文清晰含笑',
+      ttsEnglishVoiceDescription: '',
     })
   })
 })

@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReadAloudClientMessage } from '@/services/read-aloud-types'
 import { DEFAULT_AI_SETTINGS } from '@/services/ai-types'
 
-const { settingsMock, streamMock } = vi.hoisted(() => ({
+const { settingsMock, streamMock, referenceMock } = vi.hoisted(() => ({
   settingsMock: vi.fn(),
   streamMock: vi.fn(),
+  referenceMock: vi.fn(),
 }))
 vi.mock('@/services/ai-settings', () => ({ getAiSettings: settingsMock }))
 vi.mock('@/services/read-aloud-api', () => ({ streamReadAloud: streamMock }))
+vi.mock('@/services/read-aloud-voice-reference', () => ({ getReadAloudVoiceReferences: referenceMock }))
 
 import { handleReadAloudPort } from './read-aloud'
 
@@ -32,6 +34,7 @@ describe('read aloud background connection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     settingsMock.mockResolvedValue({ ...DEFAULT_AI_SETTINGS, ttsApiKey: 'stored-key' })
+    referenceMock.mockResolvedValue({ default: null, zh: null, en: null })
   })
 
   it('reads credentials from stored settings and relays audio before generation completes', async () => {
@@ -103,5 +106,39 @@ describe('read aloud background connection', () => {
     await flush()
     expect(streamMock).toHaveBeenCalledOnce()
     expect(port.postMessage).toHaveBeenCalledWith({ type: 'error', message: 'Invalid speech API key' })
+  })
+
+  it('loads the VoiceClone reference once and passes its snapshot to the API', async () => {
+    const reference = { name: '稳定音色.wav', dataUrl: 'data:audio/wav;base64,AQACAA==' }
+    settingsMock.mockResolvedValue({ ...DEFAULT_AI_SETTINGS, ttsApiKey: 'stored-key', ttsModel: 'mimo-v2.5-tts-voiceclone' })
+    const references = { default: null, zh: reference, en: reference }
+    referenceMock.mockResolvedValue(references)
+    streamMock.mockResolvedValue(undefined)
+    const port = createPort()
+    handleReadAloudPort(port as unknown as chrome.runtime.Port)
+    port.emit({ type: 'start', text: '你好' })
+    await flush()
+
+    expect(referenceMock).toHaveBeenCalledOnce()
+    expect(streamMock).toHaveBeenCalledOnce()
+    expect(streamMock.mock.calls[0]![4]).toEqual(references)
+    expect(port.postMessage).toHaveBeenLastCalledWith({ type: 'done' })
+  })
+
+  it('does not synthesize or post audio if stopped while the VoiceClone reference loads', async () => {
+    settingsMock.mockResolvedValue({ ...DEFAULT_AI_SETTINGS, ttsApiKey: 'stored-key', ttsModel: 'mimo-v2.5-tts-voiceclone' })
+    let resolveReference: ((reference: null) => void) | undefined
+    referenceMock.mockReturnValue(new Promise((resolve) => { resolveReference = resolve }))
+    const port = createPort()
+    handleReadAloudPort(port as unknown as chrome.runtime.Port)
+    port.emit({ type: 'start', text: '你好' })
+    await flush()
+    expect(referenceMock).toHaveBeenCalledOnce()
+    port.emit({ type: 'cancel' })
+    resolveReference?.(null)
+    await flush()
+
+    expect(streamMock).not.toHaveBeenCalled()
+    expect(port.postMessage).not.toHaveBeenCalled()
   })
 })

@@ -30,6 +30,8 @@ export interface AiSettings {
   ttsApiKey: string
   ttsModel: string
   ttsVoiceDescription: string
+  ttsChineseVoiceDescription: string
+  ttsEnglishVoiceDescription: string
   systemPrompt: string
   promptOptimizerSystemPrompt: string
   defaultTargetLanguage: string
@@ -167,6 +169,8 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   ttsApiKey: '',
   ttsModel: 'mimo-v2.5-tts-voicedesign',
   ttsVoiceDescription: '性感御姐音色',
+  ttsChineseVoiceDescription: '',
+  ttsEnglishVoiceDescription: '',
   systemPrompt: '你是一名专业翻译助手，请忠实翻译文本并保留原有格式。',
   promptOptimizerSystemPrompt: DEFAULT_PROMPT_OPTIMIZER_SYSTEM_PROMPT,
   defaultTargetLanguage: '中文',
@@ -222,6 +226,8 @@ export function normalizeAiSettings(input?: Partial<AiSettings> | null): AiSetti
     ttsModel: input?.ttsModel?.trim() || DEFAULT_AI_SETTINGS.ttsModel,
     ttsVoiceDescription:
       input?.ttsVoiceDescription?.trim() || DEFAULT_AI_SETTINGS.ttsVoiceDescription,
+    ttsChineseVoiceDescription: input?.ttsChineseVoiceDescription?.trim() || '',
+    ttsEnglishVoiceDescription: input?.ttsEnglishVoiceDescription?.trim() || '',
     systemPrompt: input?.systemPrompt?.trim() || DEFAULT_AI_SETTINGS.systemPrompt,
     promptOptimizerSystemPrompt:
       input?.promptOptimizerSystemPrompt?.trim() ||

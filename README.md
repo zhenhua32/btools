@@ -22,6 +22,8 @@ BTools 是一个基于 Vue 3 和 Chrome Extension Manifest V3 的浏览器工具
 - AI 朗读
 	- 工具内文本朗读、网页划词朗读和右键朗读
 	- MiMo 音色描述配置，默认“性感御姐音色”
+	- 中英文分别保存试听 WAV/MP3，VoiceClone 按句自动选择参考音色
+	- 导入不含密钥的音色组合 JSON，一次配置中英文声音与朗读风格
 	- 按短句生成并连续播放，支持随时停止
 - AI 提示词优化
 	- 按 MiniMax-H3 官方指南支持 T2VA、I2VA、FL2VA、L2VA 与 Ref2VA
@@ -58,9 +60,26 @@ npm run test
 
 1. 打开“AI 设置”中的“朗读 / 音色设计”，填写独立的朗读 API Key。默认 Base URL 为 `https://api.xiaomimimo.com/v1`，模型为 `mimo-v2.5-tts-voicedesign`，音色描述为“性感御姐音色”；音色描述可自行修改。仅使用朗读时无需配置翻译 API Key 和模型。
 2. 在“AI 朗读”工具中输入文本后开始朗读，或在网页选中文本后点击悬浮朗读按钮，也可使用右键菜单中的朗读操作。“AI 设置”可单独开关悬浮朗读按钮。
-3. VoiceDesign 暂不支持实时音频分片。BTools 按短句生成音频并连续播放，首段完成后开始朗读，后续段落继续生成；分段音色可能略有变化。具体能力见 [MiMo 语音合成指南](https://mimo.mi.com/docs/en-US/quick-start/usage-guide/audio/speech-synthesis-v2.5)。
+3. VoiceDesign 和 VoiceClone 暂不支持实时音频分片。BTools 按短句生成音频并连续播放，首段完成后开始朗读，后续段落继续生成；VoiceDesign 独立设计每段的音色，可能略有变化，VoiceClone 则复用同一参考声音。具体能力见 [MiMo 语音合成指南](https://mimo.mi.com/docs/en-US/quick-start/usage-guide/audio/speech-synthesis-v2.5)。
 4. 点击停止按钮可停止当前朗读并取消后续生成。API Key 与音色配置保存在当前浏览器本地，朗读请求通过扩展后台发送。
 5. 划词朗读与右键朗读支持 HTTP/HTTPS 网页（含 localhost）和本地 HTML 文件（`file://`）。本地文件需要在扩展详情中开启“允许访问文件网址”，重新加载扩展后刷新网页。
+6. 要复用试听满意的声音，在“AI 设置”的 VoiceClone 参考音频区分别选择通用、中文或英文 WAV/MP3，上传后可直接试听或独立移除。三种参考独立保存在当前浏览器本地，单份音频 Base64 编码上限为 10 MB，实际保存还取决于浏览器本地存储空间。选择文件即保存，普通的设置保存、重置或切换模型均会保留三种参考。
+7. 将模型改为 `mimo-v2.5-tts-voiceclone` 后，朗读按句的主要语言选择参考音色；中文句中嵌入短英文词时仍使用中文音色。缺少对应语言参考时使用通用参考，二者都没有时会在发起请求前提示补充。之前保存的单一参考会继续作为通用参考使用。
+8. “通用朗读风格 / 语速”只描述情绪、速度和说话方式。可分别填写中文与英文朗读风格覆盖通用风格，留空则沿用通用风格。年龄、性别和音高描述用于 VoiceDesign 设计试听音色，克隆时使用“保留参考音色，自然朗读”等风格指令。
+9. 点击“导入音色组合 JSON”可一次配置中文与英文参考及对应风格，并切换到 VoiceClone。组合文件只包含版本、模型、三种风格和中英文参考音频，不包含 API Key 或接口地址；导入保留已保存的接口、密钥、其他 AI 设置及通用参考。无效文件或存储不足时保留旧组合，不会将其他未保存的表单项写入设置。
+
+仓库提供 [P1 中文 + C1「柔滑含笑」英文音色组合示例](examples/read-aloud/P1-C1-voice-preset.json)，可在 AI 设置中直接导入。
+
+本地试听脚本 `scripts/mimo-voice-audition.mjs` 可生成不同方向的音色试听。在已被 Git 忽略的 `.mimo-audition.local.json` 中配置 `baseUrl`、`apiKey` 和可选的 `timeoutMs`，然后运行 `node scripts/mimo-voice-audition.mjs --config .mimo-audition.local.json --out "<绝对输出目录>"`。通过 `--preset` 选择配方：
+
+- `default`：四款中英双语设计试听，以及使用同一份 A 音频的中英文克隆对照。
+- `c-young`：三款年轻、活泼的柔滑女声，以及使用同一份 C2 音频的中英克隆对照。
+- `c-mandarin`：三款清透、明快的年轻中文女声，以及使用同一份 Z2 中文音频的中英克隆对照。
+- `playful-reference`：指定本地 WAV/MP3，使用同一参考音频生成自然、含笑俏皮、柔滑从容的中文朗读，以及一段英文验证。
+
+`playful-reference` 需要增加 `--reference "<本地音频路径>" --reference-source "<公开来源页面 URL>"`，可用 `--reference-title "<音频标题>"` 标注片段。参考音频独立于生成配方，所有请求复用同一份音频，清单记录来源和文件校验值，不包含音频编码。
+
+不同配方使用不同输出目录。输出目录包含 WAV 和记录提示词、朗读文本的 `manifest.json`；重复运行会校验并跳过已有样本。音色定稿后可删除临时配置。脚本离线测试运行 `node --test scripts/mimo-voice-audition.node-check.mjs`。
 
 ## AI 提示词优化说明
 

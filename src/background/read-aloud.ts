@@ -1,5 +1,6 @@
 import { getAiSettings } from '@/services/ai-settings'
 import { streamReadAloud } from '@/services/read-aloud-api'
+import { getReadAloudVoiceReferences } from '@/services/read-aloud-voice-reference'
 import {
   isReadAloudClientMessage,
   type ReadAloudServerMessage,
@@ -47,6 +48,10 @@ export function handleReadAloudPort(port: chrome.runtime.Port): void {
       try {
         const settings = await getAiSettings()
         if (signal.aborted || disconnected) return
+        const reference = settings.ttsModel.toLowerCase().includes('voiceclone')
+          ? await getReadAloudVoiceReferences()
+          : null
+        if (signal.aborted || disconnected) return
         await streamReadAloud(message.text, settings, async (chunk) => {
           if (!message.useBackpressure) {
             post({ type: 'audio', chunk })
@@ -71,7 +76,7 @@ export function handleReadAloudPort(port: chrome.runtime.Port): void {
           })
           post({ type: 'audio', chunk, id })
           await ready
-        }, signal)
+        }, signal, reference)
         post({ type: 'done' })
       } catch (error) {
         if (signal.aborted || disconnected) return

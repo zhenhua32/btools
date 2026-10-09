@@ -16,3 +16,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Temporary MiMo audition credentials
+/.mimo-audition.local.json

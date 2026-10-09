@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReadAloudServerMessage } from './read-aloud-types'
 import { READ_ALOUD_PORT_NAME } from './read-aloud-types'
 import { createReadAloudSession } from './read-aloud-client'
+import { DEFAULT_AI_SETTINGS } from './ai-types'
 
-const { players, settingsMock, streamMock, eventOrder } = vi.hoisted(() => ({
+const { players, settingsMock, streamMock, referenceMock, eventOrder } = vi.hoisted(() => ({
   players: [] as {
     callbacks: { onPlaying: () => void; onFinished: () => void; onError: (message: string) => void; onBlocked: () => void; onResumed: () => void }
     addChunk: ReturnType<typeof vi.fn>
@@ -13,11 +14,13 @@ const { players, settingsMock, streamMock, eventOrder } = vi.hoisted(() => ({
   }[],
   settingsMock: vi.fn(),
   streamMock: vi.fn(),
+  referenceMock: vi.fn(),
   eventOrder: [] as string[],
 }))
 
 vi.mock('./ai-settings', () => ({ getAiSettings: settingsMock }))
 vi.mock('./read-aloud-api', () => ({ streamReadAloud: streamMock }))
+vi.mock('./read-aloud-voice-reference', () => ({ getReadAloudVoiceReferences: referenceMock }))
 vi.mock('./read-aloud-player', () => ({
   ReadAloudPlayer: class {
     addChunk = vi.fn(() => Promise.resolve())
@@ -49,6 +52,8 @@ describe('read aloud client', () => {
     players.length = 0
     eventOrder.length = 0
     vi.clearAllMocks()
+    settingsMock.mockResolvedValue({ ...DEFAULT_AI_SETTINGS, ttsModel: 'mimo-v2.5-tts-voiceclone' })
+    referenceMock.mockResolvedValue({ default: null, zh: null, en: null })
   })
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -140,5 +145,38 @@ describe('read aloud client', () => {
     resolveCapacity?.()
     await Promise.resolve()
     expect(port.postMessage).toHaveBeenCalledTimes(2)
+  })
+
+  it('unlocks audio synchronously before loading the VoiceClone reference in direct mode', async () => {
+    vi.stubGlobal('chrome', undefined)
+    const reference = { name: '稳定音色.wav', dataUrl: 'data:audio/wav;base64,AQACAA==' }
+    const references = { default: null, zh: reference, en: reference }
+    referenceMock.mockImplementation(async () => { eventOrder.push('load reference'); return references })
+    streamMock.mockResolvedValue(undefined)
+    const session = createReadAloudSession('你好', { onStatus: vi.fn(), onError: vi.fn() })
+    expect(eventOrder).toEqual(['unlock audio'])
+    for (let index = 0; index < 10; index++) await Promise.resolve()
+
+    expect(eventOrder).toEqual(['unlock audio', 'load reference'])
+    expect(referenceMock).toHaveBeenCalledOnce()
+    expect(streamMock.mock.calls[0]![4]).toEqual(references)
+    session.stop()
+  })
+
+  it('never starts direct synthesis or reports stale errors after stopping while the reference loads', async () => {
+    vi.stubGlobal('chrome', undefined)
+    let resolveReference: ((reference: null) => void) | undefined
+    referenceMock.mockReturnValue(new Promise((resolve) => { resolveReference = resolve }))
+    const onError = vi.fn()
+    const session = createReadAloudSession('你好', { onStatus: vi.fn(), onError })
+    for (let index = 0; index < 10; index++) await Promise.resolve()
+    expect(referenceMock).toHaveBeenCalledOnce()
+    session.stop()
+    resolveReference?.(null)
+    for (let index = 0; index < 10; index++) await Promise.resolve()
+
+    expect(streamMock).not.toHaveBeenCalled()
+    expect(onError).not.toHaveBeenCalled()
+    expect(players[0].finish).not.toHaveBeenCalled()
   })
 })
