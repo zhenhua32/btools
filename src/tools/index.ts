@@ -2,6 +2,7 @@
 import './text-diff'
 import './json-formatter'
 import './encoding'
+import './text-compression'
 import './elo-winrate'
 import './bookmark-checker'
 import './bookmark-merger'
