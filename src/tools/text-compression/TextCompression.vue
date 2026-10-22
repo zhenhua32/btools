@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { NAlert, NButton, NCard, NInput, NSelect, NSpace, NText } from 'naive-ui'
+import FileCompression from './FileCompression.vue'
 import { compressText, decompressText } from '@/services/text-compression-client'
 import {
   ALGORITHM_OPTIONS,
@@ -13,6 +14,11 @@ import {
   type TextEncoding,
 } from '@/services/text-compression-types'
 
+const compressionMode = ref<'text' | 'file'>('text')
+const fileModeOpened = ref(false)
+watch(compressionMode, (mode) => {
+  if (mode === 'file') fileModeOpened.value = true
+}, { flush: 'sync' })
 const originalText = ref('')
 const compressedText = ref('')
 const algorithm = ref<CompressionAlgorithm>(DEFAULT_ALGORITHM)
@@ -163,7 +169,12 @@ function clearAll() {
 </script>
 
 <template>
-  <div class="text-compression">
+  <div class="compression-tool">
+    <NSpace class="compression-mode" aria-label="压缩模式">
+      <NButton :type="compressionMode === 'text' ? 'primary' : 'default'" :aria-pressed="compressionMode === 'text'" @click="compressionMode = 'text'">文本</NButton>
+      <NButton :type="compressionMode === 'file' ? 'primary' : 'default'" :aria-pressed="compressionMode === 'file'" @click="compressionMode = 'file'">文件</NButton>
+    </NSpace>
+  <div v-show="compressionMode === 'text'" class="text-compression">
     <div class="compression-header">
       <NText strong class="compression-title">文本压缩</NText>
       <p class="compression-description">将文本无损压缩为可复制的文本，粘贴压缩文本即可自动识别格式并解压。所有处理均在本地完成。</p>
@@ -222,9 +233,12 @@ function clearAll() {
       <p class="compression-hint">压缩率 = 压缩文本 / 原文，包含完整格式标识；小于 100% 表示更小。字符数按 Unicode 码点统计。</p>
     </NCard>
   </div>
+    <FileCompression v-show="compressionMode === 'file'" v-if="fileModeOpened" />
+  </div>
 </template>
 
 <style scoped>
+.compression-tool { display: flex; flex-direction: column; gap: 16px; }
 .text-compression { display: flex; flex-direction: column; gap: 12px; min-height: 100%; }
 .compression-title { font-size: 18px; }
 .compression-description, .compression-hint, .compression-metrics { color: var(--text-secondary, #6b7280); font-size: 12px; line-height: 1.7; }

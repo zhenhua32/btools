@@ -12,6 +12,11 @@ vi.mock('@/services/text-compression-client', () => ({
   decompressText: decompressMock,
 }))
 
+vi.mock('./FileCompression.vue', async () => {
+  const { defineComponent, h } = await import('vue')
+  return { default: defineComponent({ setup: () => () => h('div', { 'data-testid': 'file-compression-mode' }, '文件上传压缩') }) }
+})
+
 vi.mock('naive-ui', async () => {
   const { defineComponent, h } = await import('vue')
   const container = defineComponent({
@@ -180,5 +185,15 @@ describe('text compression tool', () => {
     await click('复制原文')
     expect(host.textContent).toContain('复制失败，请选中文本后手动复制')
     expect(document.querySelectorAll('textarea')).toHaveLength(2)
+  })
+
+  it('switches between text and file modes while preserving the text inputs', async () => {
+    await edit('原文', 'keep input when switching')
+    await click('文件')
+    expect(host.querySelector<HTMLElement>('.text-compression')?.style.display).toBe('none')
+    expect(host.querySelector('[data-testid="file-compression-mode"]')).not.toBeNull()
+    await click('文本')
+    expect(textarea('原文').value).toBe('keep input when switching')
+    expect(host.querySelector<HTMLElement>('[data-testid="file-compression-mode"]')?.style.display).toBe('none')
   })
 })

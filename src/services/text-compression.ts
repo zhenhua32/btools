@@ -22,7 +22,7 @@ type ZstdModule = typeof import('../../node_modules/@bokuweb/zstd-wasm/dist/web/
 let brotliPromise: Promise<BrotliModule> | undefined
 let zstdPromise: Promise<ZstdModule> | undefined
 
-async function loadBrotli(): Promise<BrotliModule> {
+export async function loadBrotli(): Promise<BrotliModule> {
   brotliPromise ??= (async () => {
     const [brotli, { default: wasmUrl }] = await Promise.all([
       import('../../node_modules/brotli-wasm/pkg.web/brotli_wasm.js'),
@@ -34,7 +34,7 @@ async function loadBrotli(): Promise<BrotliModule> {
   return brotliPromise
 }
 
-async function loadZstd(): Promise<ZstdModule> {
+export async function loadZstd(): Promise<ZstdModule> {
   zstdPromise ??= (async () => {
     const [zstd, { default: wasmUrl }] = await Promise.all([
       import('../../node_modules/@bokuweb/zstd-wasm/dist/web/index.web.js'),
@@ -122,6 +122,12 @@ async function compressBytes(input: Uint8Array, text: string, algorithm: Compres
     case 'gzip': return gzipSync(input, { level: 9, mtime: 0 })
     case 'lz-string': return compressToUint8Array(text)
   }
+}
+
+/** Raw standard-format compression, shared with the binary file tool. */
+export async function compressBinaryBytes(input: Uint8Array,
+  algorithm: Exclude<CompressionAlgorithm, 'lz-string'>): Promise<Uint8Array> {
+  return compressBytes(input, '', algorithm)
 }
 
 async function decompressBrotli(input: Uint8Array, expected: number): Promise<Uint8Array> {
