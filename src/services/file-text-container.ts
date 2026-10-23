@@ -1,9 +1,12 @@
-import { compressFile, decompressFile } from './file-compression'
+import { decompressFile } from './file-compression'
+import { characters, checksum, crcHex, updateCrc } from './file-compression-chunk'
+import type { CompressionChunkResult } from './file-compression-chunk'
+import { checkCompressionAbort, FileCompressionPool } from './file-compression-pool'
 import { FILE_ALGORITHM_OPTIONS, MAX_ARCHIVE_BYTES } from './file-compression-types'
 import type { FileCompressionAlgorithm, FileCompressionResult } from './file-compression-types'
 import { createOutputSink } from './file-output-storage'
 import {
-  FILE_CHUNK_BYTES, MAX_EXPANDED_BYTES, MAX_TEXT_ARCHIVE_BYTES, MAX_UPLOAD_BYTES,
+  DEFAULT_FILE_CONCURRENCY, FILE_CHUNK_BYTES, MAX_EXPANDED_BYTES, MAX_TEXT_ARCHIVE_BYTES, MAX_UPLOAD_BYTES, validateFileConcurrency,
 } from './file-stream-types'
 import type { FileOperationContext, TextPart } from './file-stream-types'
 import { ENCODING_OPTIONS } from './text-compression-types'
@@ -13,22 +16,6 @@ import { decodeBytes, encodeBytes } from './text-encodings'
 const encoder = new TextEncoder()
 const CORRUPTED = '文件压缩文本损坏、不完整，或校验失败'
 const MAX_RECORD_BYTES = MAX_ARCHIVE_BYTES * 3 + 16384
-const crcTable = Uint32Array.from({ length: 256 }, (_, value) => {
-  for (let bit = 0; bit < 8; bit++) value = (value >>> 1) ^ ((value & 1) ? 0xedb88320 : 0)
-  return value >>> 0
-})
-
-function updateCrc(crc: number, bytes: Uint8Array): number {
-  for (const byte of bytes) crc = (crc >>> 8) ^ crcTable[(crc ^ byte) & 255]
-  return crc
-}
-function crcHex(crc: number): string { return ((crc ^ 0xffffffff) >>> 0).toString(16).padStart(8, '0') }
-function checksum(bytes: Uint8Array): string { return crcHex(updateCrc(0xffffffff, bytes)) }
-function characters(text: string): number {
-  let count = 0
-  for (const _character of text) count++
-  return count
-}
 function integer(text: string, maximum: number): number {
   if (!/^(0|[1-9a-z][0-9a-z]{0,7})$/.test(text)) throw new Error(CORRUPTED)
   const value = Number.parseInt(text, 36)
@@ -93,7 +80,10 @@ async function* lines(file: Blob): AsyncGenerator<string> {
 export async function compressFileToText(file: Blob & { name?: string },
   algorithm: FileCompressionAlgorithm, encoding: TextEncoding,
   context: FileOperationContext): Promise<FileCompressionResult> {
+  checkCompressionAbort(context.signal)
   validateChoices(algorithm, encoding)
+  const concurrency = context.concurrency ?? DEFAULT_FILE_CONCURRENCY
+  validateFileConcurrency(concurrency)
   if (file.size > MAX_UPLOAD_BYTES) throw new Error('上传的原始文件不能超过 1 GiB')
   const name = safeName(file.name ?? 'file.bin')
   const type = file.type || 'application/octet-stream'
@@ -106,51 +96,89 @@ export async function compressFileToText(file: Blob & { name?: string },
   const parts: TextPart[] = []
   let textCharacters = characters(header)
   let crc = 0xffffffff
+  let pool: FileCompressionPool | undefined
+  let heartbeat: ReturnType<typeof setInterval> | undefined
+  let completed = 0
   try {
+    checkCompressionAbort(context.signal)
+    if (count) pool = new FileCompressionPool(Math.min(count, concurrency), context.signal)
+    // LZMA-JS blocks can take minutes. Report real completed bytes while waiting so the
+    // operation's inactivity watchdog does not confuse active CPU work with a dead worker.
+    if (count && algorithm === 'lzma') heartbeat = setInterval(() => {
+      if (!context.signal?.aborted) context.onProgress?.({ stage: '正在压缩并编码', completed, total: file.size })
+    }, 10000)
     await sink.write(encoder.encode(header))
-    for (let index = 0; index < count; index++) {
+    type Outcome = { result: CompressionChunkResult } | { error: unknown }
+    const pending = new Map<number, Promise<Outcome>>()
+    let nextRead = 0
+    const dispatch = async () => {
+      checkCompressionAbort(context.signal)
+      const index = nextRead++
       const offset = index * FILE_CHUNK_BYTES
       const bytes = new Uint8Array(await file.slice(offset, Math.min(offset + FILE_CHUNK_BYTES, file.size)).arrayBuffer())
+      checkCompressionAbort(context.signal)
       if (bytes.length !== Math.min(FILE_CHUNK_BYTES, file.size - offset)) throw new Error('文件读取不完整')
-      const result = await compressFile({ name: 'chunk.bin', bytes }, algorithm)
-      const compressed = result.files[0].bytes
-      const record = `C:${index.toString(36)}:${bytes.length.toString(36)}:${compressed.length.toString(36)}:${checksum(bytes)}:${checksum(compressed)}:${encodeBytes(compressed, encoding)}\n`
-      const recordBytes = encoder.encode(record)
-      const recordCharacters = characters(record)
+      // Read source bytes in order, before transferring their buffers into the child workers.
+      crc = updateCrc(crc, bytes)
+      // Handle rejection immediately, even when an earlier block is still being compressed.
+      pending.set(index, pool!.run({ index, bytes, algorithm, encoding,
+        lzmaTimeoutMs: algorithm === 'lzma' ? 120000 * concurrency : undefined }).then(
+        (result): Outcome => ({ result }), (error): Outcome => ({ error })))
+    }
+    for (let index = 0; index < Math.min(count, concurrency); index++) await dispatch()
+    for (let index = 0; index < count; index++) {
+      const outcome = await pending.get(index)!
+      pending.delete(index)
+      checkCompressionAbort(context.signal)
+      if ('error' in outcome) throw outcome.error
+      const { bytes: recordBytes, characters: recordCharacters } = outcome.result
       const start = index ? sink.size : 0
       await sink.write(recordBytes)
+      checkCompressionAbort(context.signal)
       if (sink.size > MAX_TEXT_ARCHIVE_BYTES) throw new Error('压缩后的文本文件超过大小限制')
       parts.push({ offset: start, size: sink.size - start, characters: recordCharacters + (index ? 0 : characters(header)) })
       textCharacters += recordCharacters
-      crc = updateCrc(crc, bytes)
-      context.onProgress?.({ stage: '正在压缩并编码', completed: offset + bytes.length, total: file.size })
+      completed = Math.min((index + 1) * FILE_CHUNK_BYTES, file.size)
+      context.onProgress?.({ stage: '正在压缩并编码', completed, total: file.size })
+      // Running tasks + completed out-of-order records never exceed concurrency. A slow first
+      // block therefore cannot make the rest of a 1 GiB file accumulate in memory.
+      if (nextRead < count) await dispatch()
     }
     const footer = `E:${count.toString(36)}:${file.size.toString(36)}:${crcHex(crc)}\n`
     const footerBytes = encoder.encode(footer)
     const footerCharacters = characters(footer)
+    checkCompressionAbort(context.signal)
     await sink.write(footerBytes)
     textCharacters += footerCharacters
     if (parts.length) {
       parts[parts.length - 1].size += footerBytes.length
       parts[parts.length - 1].characters += footerCharacters
     } else parts.push({ offset: 0, size: sink.size, characters: textCharacters })
+    checkCompressionAbort(context.signal)
     const output = await sink.finish()
+    checkCompressionAbort(context.signal)
     context.onProgress?.({ stage: '处理完成', completed: file.size, total: file.size })
     const textOutput = { ...output, encoding, characters: textCharacters, parts }
     return { algorithm, files: [], outputs: [textOutput], textOutput, originalBytes: file.size,
       compressedBytes: output.blob.size, byteRatio: file.size ? output.blob.size / file.size : null }
   } catch (error) {
+    pool?.terminate(error instanceof Error ? error : undefined)
     await sink.abort()
     throw error
+  } finally {
+    if (heartbeat !== undefined) clearInterval(heartbeat)
+    pool?.terminate()
   }
 }
 
 export async function decompressTextContainer(file: Blob, context: FileOperationContext): Promise<FileCompressionResult> {
+  checkCompressionAbort(context.signal)
   if (file.size > MAX_TEXT_ARCHIVE_BYTES) throw new Error('上传的压缩文本文件不能超过 3 GiB')
   const records = lines(file)
   let sink: Awaited<ReturnType<typeof createOutputSink>> | undefined
   try {
     const first = await records.next()
+    checkCompressionAbort(context.signal)
     if (first.done) throw new Error(CORRUPTED)
     const header = /^BTF2:([a-z]+):([a-z0-9]+):([^:]+):([^:]+):([A-Za-z0-9_-]+):([0-9a-f]{8})$/.exec(first.value)
     if (!header) throw new Error('无法识别文件压缩文本，请提供包含 BTF2: 前缀的完整结果')
@@ -166,10 +194,13 @@ export async function decompressTextContainer(file: Blob, context: FileOperation
       typeof metadata[1] !== 'string' || metadata[0].length > 1024 || metadata[1].length > 255 ||
       /[\u0000-\u001f\u007f]/.test(metadata[1])) throw new Error(CORRUPTED)
     sink = await createOutputSink(context, safeName(metadata[0]), metadata[1] || 'application/octet-stream')
+    checkCompressionAbort(context.signal)
     let total = 0
     let crc = 0xffffffff
     for (let index = 0; index < count; index++) {
+      checkCompressionAbort(context.signal)
       const next = await records.next()
+      checkCompressionAbort(context.signal)
       if (next.done) throw new Error(CORRUPTED)
       // Base91 includes colons, so match only the fixed record fields.
       const record = /^C:([^:]+):([^:]+):([^:]+):([0-9a-f]{8}):([0-9a-f]{8}):([\s\S]*)$/.exec(next.value)
@@ -180,24 +211,34 @@ export async function decompressTextContainer(file: Blob, context: FileOperation
       const compressed = decodeBytes(record[6], encoding)
       if (compressed.length !== compressedSize || checksum(compressed) !== record[5]) throw new Error(CORRUPTED)
       const decompressed = await decompressFile({ name: 'chunk.bin', bytes: compressed }, algorithm)
+      checkCompressionAbort(context.signal)
       if (decompressed.files.length !== 1) throw new Error(CORRUPTED)
       const bytes = decompressed.files[0].bytes
       if (bytes.length !== integer(record[2], FILE_CHUNK_BYTES) || checksum(bytes) !== record[4]) throw new Error(CORRUPTED)
       total += bytes.length
       if (total > expected || total > MAX_EXPANDED_BYTES) throw new Error('解压文件不能超过 1 GiB')
       crc = updateCrc(crc, bytes)
+      checkCompressionAbort(context.signal)
       await sink.write(bytes)
+      checkCompressionAbort(context.signal)
       context.onProgress?.({ stage: '正在解码并解压', completed: total, total: expected })
     }
     const last = await records.next()
+    checkCompressionAbort(context.signal)
     if (last.done || last.value !== `E:${count.toString(36)}:${total.toString(36)}:${crcHex(crc)}` || total !== expected) throw new Error(CORRUPTED)
-    for await (const extra of records) if (extra.length) throw new Error(CORRUPTED)
+    for await (const extra of records) {
+      checkCompressionAbort(context.signal)
+      if (extra.length) throw new Error(CORRUPTED)
+    }
+    checkCompressionAbort(context.signal)
     const output = await sink.finish()
+    checkCompressionAbort(context.signal)
     context.onProgress?.({ stage: '处理完成', completed: total, total })
     return { algorithm, files: [], outputs: [output], originalBytes: total, compressedBytes: file.size,
       byteRatio: total ? file.size / total : null }
   } catch (error) {
     await sink?.abort()
+    if (error instanceof Error && error.name === 'AbortError') throw error
     if (error instanceof Error && /超过|存储|64 MiB|OPFS|磁盘|不受支持|无法识别/.test(error.message)) throw error
     throw new Error(CORRUPTED)
   } finally {

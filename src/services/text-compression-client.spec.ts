@@ -100,7 +100,7 @@ describe('text compression worker client', () => {
       byteRatio: 2 / 3,
     }
     expect(worker.postMessage).toHaveBeenCalledWith({
-      operation: 'compress-file', file, algorithm: 'brotli', encoding: 'base32768', operationId: expect.any(String),
+      operation: 'compress-file', file, algorithm: 'brotli', encoding: 'base32768', concurrency: 4, operationId: expect.any(String),
     })
     worker.onmessage!(new MessageEvent('message', { data: { success: true, result: fileResult } }))
     await expect(pending).resolves.toEqual(fileResult)
@@ -139,16 +139,55 @@ describe('text compression worker client', () => {
     expect(worker.terminate).toHaveBeenCalledOnce()
   })
 
-  it('cancels the worker immediately and ignores late results', async () => {
+  it('rejects cancellation immediately while allowing child workers to release their storage', async () => {
     const controller = new AbortController()
     const pending = compressFile(new File(['data'], 'large.bin'), 'brotli', { signal: controller.signal })
     const assertion = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
     controller.abort()
     await assertion
+    expect(worker.terminate).not.toHaveBeenCalled()
+    const operationId = worker.postMessage.mock.calls[0]![0].operationId
+    expect(worker.postMessage).toHaveBeenLastCalledWith({ operation: 'cancel-file', operationId })
+    worker.onmessage!(new MessageEvent('message', { data: { type: 'cancelled', operationId } }))
     expect(worker.terminate).toHaveBeenCalledOnce()
     worker.onmessage!(new MessageEvent('message', { data: { success: true, result } }))
     expect(worker.terminate).toHaveBeenCalledOnce()
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('ignores progress and other operation acknowledgements while cancelling, then forces cleanup', async () => {
+    const controller = new AbortController()
+    const onProgress = vi.fn()
+    const pending = compressFile(new File(['data'], 'large.bin'), 'brotli', { signal: controller.signal, onProgress, concurrency: 16 })
+    const assertion = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(worker.postMessage.mock.calls[0]![0].concurrency).toBe(16)
+    controller.abort()
+    await assertion
+    worker.onmessage!(new MessageEvent('message', { data: { type: 'progress', progress: { completed: 1, total: 4 } } }))
+    worker.onmessage!(new MessageEvent('message', { data: { type: 'cancelled', operationId: 'another-task' } }))
+    expect(onProgress).not.toHaveBeenCalled()
+    expect(worker.terminate).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(worker.terminate).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('keeps a late success from reviving a cancelled operation', async () => {
+    const controller = new AbortController()
+    const pending = compressFile(new File(['data'], 'large.bin'), 'brotli', { signal: controller.signal })
+    const assertion = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    controller.abort()
+    await assertion
+    worker.onmessage!(new MessageEvent('message', { data: { success: true, result } }))
+    expect(worker.terminate).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('rejects unsupported concurrency without starting a worker', async () => {
+    const previousWorker = worker
+    await expect(compressFile(new File(['data'], 'data.bin'), 'brotli', { concurrency: 3 as 4 }))
+      .rejects.toThrow('并发数仅支持')
+    expect(worker).toBe(previousWorker)
   })
 
   it('does not start a worker for an already cancelled file operation', async () => {

@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, nextTick, type App } from 'vue'
 import type { FileCompressionResult } from '@/services/file-compression-types'
-import { MAX_TEXT_ARCHIVE_BYTES, MAX_UPLOAD_BYTES, type FileOperationProgress, type TextFileOutput } from '@/services/file-stream-types'
+import {
+  DEFAULT_FILE_CONCURRENCY, FILE_CONCURRENCY_OPTIONS, MAX_TEXT_ARCHIVE_BYTES, MAX_UPLOAD_BYTES,
+  type FileCompressionConcurrency, type FileOperationProgress, type TextFileOutput,
+} from '@/services/file-stream-types'
 
 const { compressMock, decompressMock, releaseMock } = vi.hoisted(() => ({
   compressMock: vi.fn(), decompressMock: vi.fn(), releaseMock: vi.fn(),
@@ -113,8 +116,12 @@ describe('file compression tool', () => {
     await click('压缩文件')
   }
 
-  it('defaults to Brotli + Base32768 and auto detection and compresses only on request', async () => {
-    expect(Array.from(host.querySelectorAll('select')).map((element) => element.value)).toEqual(['brotli', 'base32768', 'auto'])
+  it('defaults to Brotli + Base32768 with four workers and auto detection and compresses only on request', async () => {
+    expect(DEFAULT_FILE_CONCURRENCY).toBe(4)
+    expect(Array.from(host.querySelectorAll('select')).map((element) => element.value)).toEqual(['brotli', 'base32768', '4', 'auto'])
+    const concurrencySelect = host.querySelector<HTMLSelectElement>('select[aria-label="文件压缩并发"]')!
+    expect(Array.from(concurrencySelect.options).map((option) => Number(option.value))).toEqual([1, 2, 4, 8, 16])
+    expect(Array.from(concurrencySelect.options).map((option) => option.textContent)).toEqual(FILE_CONCURRENCY_OPTIONS.map((option) => option.label))
     expect(button('压缩文件').disabled).toBe(true)
     const file = new File([new Uint8Array([37, 80, 68, 70, 0, 255])], 'report.pdf', { type: 'application/pdf' })
     const input = await upload('compress', file)
@@ -122,7 +129,7 @@ describe('file compression tool', () => {
     expect(host.querySelector('[data-testid="source-file-info"]')?.textContent).toContain('report.pdf6 字节')
     expect(compressMock).not.toHaveBeenCalled()
     await click('压缩文件')
-    expect(compressMock).toHaveBeenCalledWith(file, 'brotli', expect.objectContaining({ encoding: 'base32768', signal: expect.any(AbortSignal), onProgress: expect.any(Function) }))
+    expect(compressMock).toHaveBeenCalledWith(file, 'brotli', expect.objectContaining({ encoding: 'base32768', concurrency: 4, signal: expect.any(AbortSignal), onProgress: expect.any(Function) }))
     const summary = host.querySelector('[data-testid="file-compress-result"]')?.textContent
     expect(summary).toContain('压缩文本字符数：15 字符')
     expect(summary).toContain('26.0%')
@@ -233,6 +240,18 @@ describe('file compression tool', () => {
     expect(decompressMock).toHaveBeenCalledWith(file, 'deflate', expect.any(Object))
   })
 
+  it.each([1, 2, 4, 8, 16] as FileCompressionConcurrency[])('passes concurrency %i while accepting a 1 GiB source', async (concurrency) => {
+    const source = new File(['small'], 'one-gib.bin')
+    Object.defineProperty(source, 'size', { value: MAX_UPLOAD_BYTES })
+    await upload('compress', source)
+    await select('文件压缩并发', String(concurrency))
+    expect(button('压缩文件').disabled).toBe(false)
+    await click('压缩文件')
+    expect(compressMock).toHaveBeenCalledWith(source, 'brotli', expect.objectContaining({ concurrency, encoding: 'base32768' }))
+    expect(host.querySelector('[data-testid="file-compress-result"]')).not.toBeNull()
+    expect(host.textContent).toContain('相同纯文本格式和压缩参数')
+  })
+
   it('accepts exactly 1 GiB without allocating it and rejects sources or archives over their actual limits', async () => {
     const source = new File(['small'], 'large.bin')
     Object.defineProperty(source, 'size', { value: MAX_UPLOAD_BYTES })
@@ -307,6 +326,38 @@ describe('file compression tool', () => {
     app!.unmount()
     app = undefined
     expect(releaseMock).toHaveBeenCalledWith(restoredResult)
+  })
+
+  it('clears completed outputs and aborts a pending compression when concurrency changes', async () => {
+    const complete = result()
+    compressMock.mockResolvedValueOnce(complete)
+    await startCompression()
+    expect(host.querySelector('[data-testid="file-compress-result"]')).not.toBeNull()
+    await select('文件压缩并发', '8')
+    expect(releaseMock).toHaveBeenCalledWith(complete)
+    expect(host.querySelector('[data-testid="file-compress-result"]')).toBeNull()
+
+    let resolve!: (value: FileCompressionResult) => void
+    compressMock.mockImplementationOnce(() => new Promise<FileCompressionResult>((done) => { resolve = done }))
+    await click('压缩文件')
+    const options = compressMock.mock.calls[1]![2] as { concurrency: number; signal: AbortSignal; onProgress: (value: FileOperationProgress) => void }
+    expect(options.concurrency).toBe(8)
+    options.onProgress({ stage: 'compress', completed: 50, total: 100 })
+    await nextTick()
+    expect(host.querySelector('[data-testid="compress-progress"]')).not.toBeNull()
+    await select('文件压缩并发', '16')
+    expect(options.signal.aborted).toBe(true)
+    expect(button('压缩文件').disabled).toBe(false)
+    expect(host.querySelector('[data-testid="compress-progress"]')).toBeNull()
+    options.onProgress({ stage: 'compress', completed: 100, total: 100 })
+    const stale = result()
+    resolve(stale)
+    await settle()
+    expect(releaseMock).toHaveBeenCalledWith(stale)
+    expect(host.querySelector('[data-testid="file-compress-result"]')).toBeNull()
+    expect(host.querySelector('[data-testid="compress-progress"]')).toBeNull()
+    await click('压缩文件')
+    expect(compressMock).toHaveBeenLastCalledWith(expect.any(File), 'brotli', expect.objectContaining({ concurrency: 16 }))
   })
 
   it('cancels decompression on new input and suppresses stale errors', async () => {

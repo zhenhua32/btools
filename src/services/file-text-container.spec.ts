@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs'
 import { createContext, runInContext } from 'node:vm'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { FILE_ALGORITHM_OPTIONS } from './file-compression-types'
+import { compressChunk } from './file-compression-chunk'
+import type { CompressionChunkRequest } from './file-compression-chunk'
 import { compressFileToText, decompressTextContainer, isTextContainer } from './file-text-container'
 import { FILE_CHUNK_BYTES, MAX_EXPANDED_BYTES, MAX_TEXT_ARCHIVE_BYTES, MAX_UPLOAD_BYTES } from './file-stream-types'
 import { ENCODING_OPTIONS } from './text-compression-types'
@@ -25,8 +27,18 @@ class LzmaWorker {
   onerror: (() => void) | null = null
   terminated = false
   readonly binaryDecoder: boolean
-  constructor(url: string) { this.binaryDecoder = String(url).includes('lzma-file-decoder') }
-  postMessage(data: { action: number; data: Uint8Array; mode: number; cbn: number }) {
+  readonly chunkWorker: boolean
+  constructor(url: string) {
+    this.binaryDecoder = String(url).includes('lzma-file-decoder')
+    this.chunkWorker = String(url).includes('file-compression-chunk.worker')
+  }
+  postMessage(data: CompressionChunkRequest | { action: number; data: Uint8Array; mode: number; cbn: number }) {
+    if ('index' in data) {
+      void compressChunk(data).then((result) => {
+        if (!this.terminated) this.onmessage?.({ data: { success: true, result } } as MessageEvent)
+      }, (error) => this.onmessage?.({ data: { success: false, error: String(error) } } as MessageEvent))
+      return
+    }
     if (this.binaryDecoder) {
       const context = createContext({ onmessage: null, setTimeout, postMessage: (message: unknown) => {
         if (!this.terminated) this.onmessage?.({ data: message } as MessageEvent)
@@ -122,6 +134,29 @@ describe('streaming text file container', () => {
     const restoredBytes = await asBytes(restored.outputs![0].blob)
     expect(restoredBytes.length).toBe(bytes.length)
     expect(restoredBytes.every((value, index) => value === bytes[index])).toBe(true)
+  })
+
+  it('preserves the exact text, checksums and copy parts for all supported concurrency choices', async () => {
+    const bytes = new Uint8Array(FILE_CHUNK_BYTES + 17).fill(42)
+    bytes.set([255, 0, 128], FILE_CHUNK_BYTES)
+    const input = new File([bytes], 'parallel.bin')
+    const serial = (await compressFileToText(input, 'deflate', 'base65536', { ...context, concurrency: 1 })).textOutput!
+    for (const concurrency of [2, 4, 8, 16] as const) {
+      const output = (await compressFileToText(input, 'deflate', 'base65536', { ...context, concurrency })).textOutput!
+      expect(await output.blob.text()).toBe(await serial.blob.text())
+      expect(output.parts).toEqual(serial.parts)
+      expect(output.characters).toBe(serial.characters)
+    }
+  })
+
+  it('rejects invalid concurrency and already cancelled jobs before reading the file', async () => {
+    const input = file()
+    const slice = vi.spyOn(input, 'slice')
+    await expect(compressFileToText(input, 'gzip', 'base64url', { ...context, concurrency: 3 as 1 })).rejects.toThrow('并发')
+    const controller = new AbortController()
+    controller.abort()
+    await expect(compressFileToText(input, 'gzip', 'base64url', { ...context, signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' })
+    expect(slice).not.toHaveBeenCalled()
   })
 
   it('reads UTF-8 across every byte boundary without using a full-file text read', async () => {

@@ -279,7 +279,8 @@ function decompressZip(bytes: Uint8Array): CompressionFile[] {
 }
 
 export async function compressFile(input: CompressionFile,
-  algorithm: FileCompressionAlgorithm = DEFAULT_FILE_ALGORITHM): Promise<FileCompressionResult> {
+  algorithm: FileCompressionAlgorithm = DEFAULT_FILE_ALGORITHM,
+  options: { lzmaTimeoutMs?: number } = {}): Promise<FileCompressionResult> {
   if (!FILE_ALGORITHM_OPTIONS.some((option) => option.value === algorithm)) throw new Error('不支持的压缩算法')
   if (input.bytes.length > MAX_FILE_BYTES) throw new Error('上传的原始文件不能超过 8 MiB')
   const name = safeName(input.name)
@@ -288,7 +289,7 @@ export async function compressFile(input: CompressionFile,
   const entryName = name === '__proto__' ? './__proto__' : name
   const bytes = algorithm === 'zip'
     ? zipSync({ [entryName]: input.bytes }, { level: 9, mtime: new Date(2020, 0, 1) })
-    : await compressBinaryBytes(input.bytes, algorithm)
+    : await compressBinaryBytes(input.bytes, algorithm, options)
   if (bytes.length > MAX_ARCHIVE_BYTES) throw new Error('压缩文件不能超过 16 MiB')
   return createResult(algorithm, [{ name: name + EXTENSIONS[algorithm], bytes: bytes.slice(),
     type: algorithm === 'zip' ? 'application/zip' : algorithm === 'gzip' ? 'application/gzip' : 'application/octet-stream' }], input.bytes.length, bytes.length)

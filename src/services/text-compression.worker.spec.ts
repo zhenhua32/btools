@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MAX_UPLOAD_BYTES } from './file-stream-types'
 import type { FileCompressionResult } from './file-compression-types'
-import type { CompressionRequest } from './text-compression-rpc'
+import type { CompressionWorkerRequest } from './text-compression-rpc'
 
 const { compressTextMock, decompressTextMock, compressFileMock, decompressFileMock, isContainerMock, decompressContainerMock, cleanupMock } = vi.hoisted(() => ({
   compressTextMock: vi.fn(),
@@ -33,7 +33,7 @@ vi.mock('./file-output-storage', () => ({
 
 describe('compression worker file requests', () => {
   const scope = {
-    onmessage: null as ((event: MessageEvent<CompressionRequest>) => Promise<void>) | null,
+    onmessage: null as ((event: MessageEvent<CompressionWorkerRequest>) => Promise<void>) | null,
     postMessage: vi.fn(),
   }
 
@@ -61,10 +61,10 @@ describe('compression worker file requests', () => {
     compressFileMock.mockResolvedValueOnce(result)
     const readWholeFile = vi.spyOn(file, 'arrayBuffer')
     await scope.onmessage!(new MessageEvent('message', {
-      data: { operation: 'compress-file', file, algorithm: 'brotli', encoding: 'base32768', operationId: 'test-compress' },
+      data: { operation: 'compress-file', file, algorithm: 'brotli', encoding: 'base32768', concurrency: 8, operationId: 'test-compress' },
     }))
     expect(compressFileMock).toHaveBeenCalledWith(file, 'brotli', 'base32768', {
-      operationId: 'test-compress', onProgress: expect.any(Function),
+      operationId: 'test-compress', onProgress: expect.any(Function), concurrency: 8, signal: expect.any(AbortSignal),
     })
     expect(readWholeFile).not.toHaveBeenCalled()
     expect(scope.postMessage).toHaveBeenCalledWith(
@@ -88,7 +88,7 @@ describe('compression worker file requests', () => {
       data: { operation: 'decompress-file', file, algorithm: 'auto', operationId: 'test-unzip' },
     }))
     expect(decompressFileMock).toHaveBeenCalledWith(file, 'auto', {
-      operationId: 'test-unzip', onProgress: expect.any(Function),
+      operationId: 'test-unzip', onProgress: expect.any(Function), signal: expect.any(AbortSignal),
     })
     expect(scope.postMessage).toHaveBeenCalledWith(
       { success: true, result }, result.files.map((entry) => entry.bytes.buffer),
@@ -99,7 +99,7 @@ describe('compression worker file requests', () => {
     const arrayBuffer = vi.fn()
     const file = { name: 'large.bin', size: MAX_UPLOAD_BYTES + 1, arrayBuffer } as unknown as File
     await scope.onmessage!(new MessageEvent('message', {
-      data: { operation: 'compress-file', file, algorithm: 'brotli', encoding: 'base32768', operationId: 'test-too-large' },
+      data: { operation: 'compress-file', file, algorithm: 'brotli', encoding: 'base32768', concurrency: 4, operationId: 'test-too-large' },
     }))
     expect(arrayBuffer).not.toHaveBeenCalled()
     expect(compressFileMock).not.toHaveBeenCalled()
@@ -120,9 +120,39 @@ describe('compression worker file requests', () => {
       data: { operation: 'decompress-file', file, algorithm: 'auto', operationId: 'test-container' },
     }))
     expect(decompressContainerMock).toHaveBeenCalledWith(file, {
-      operationId: 'test-container', onProgress: expect.any(Function),
+      operationId: 'test-container', onProgress: expect.any(Function), signal: expect.any(AbortSignal),
     })
     expect(decompressFileMock).not.toHaveBeenCalled()
     expect(scope.postMessage).toHaveBeenCalledWith({ success: true, result }, [])
+  })
+
+  it('cancels an active coordinator and acknowledges after cleanup instead of returning success', async () => {
+    let signal: AbortSignal | undefined
+    compressFileMock.mockImplementationOnce((_file, _algorithm, _encoding, context) => {
+      signal = context.signal
+      return new Promise((_resolve, reject) => {
+        signal!.addEventListener('abort', () => reject(new DOMException('已取消处理', 'AbortError')), { once: true })
+      })
+    })
+    const file = new File(['data'], 'large.bin')
+    const pending = scope.onmessage!(new MessageEvent('message', {
+      data: { operation: 'compress-file', file, algorithm: 'brotli', encoding: 'base32768', concurrency: 16, operationId: 'cancel-pool' },
+    }))
+    await scope.onmessage!(new MessageEvent('message', { data: { operation: 'cancel-file', operationId: 'other-pool' } }))
+    expect(signal!.aborted).toBe(false)
+    await scope.onmessage!(new MessageEvent('message', { data: { operation: 'cancel-file', operationId: 'cancel-pool' } }))
+    expect(signal!.aborted).toBe(true)
+    await pending
+    expect(cleanupMock).toHaveBeenCalledWith('cancel-pool')
+    expect(scope.postMessage).toHaveBeenLastCalledWith({ type: 'cancelled', operationId: 'cancel-pool' })
+    expect(scope.postMessage.mock.calls.some(([message]) => message.success === true)).toBe(false)
+  })
+
+  it('rejects malformed concurrency before creating child work', async () => {
+    await scope.onmessage!(new MessageEvent('message', {
+      data: { operation: 'compress-file', file: new File(['data'], 'data.bin'), algorithm: 'brotli', encoding: 'base32768', concurrency: 3 as 4, operationId: 'invalid-concurrency' },
+    }))
+    expect(compressFileMock).not.toHaveBeenCalled()
+    expect(scope.postMessage).toHaveBeenCalledWith({ success: false, error: '压缩并发数仅支持 1、2、4、8、16' })
   })
 })

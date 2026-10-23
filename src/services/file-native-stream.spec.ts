@@ -82,6 +82,22 @@ async function decode(data: Uint8Array, algorithm: FileCompressionAlgorithm) {
 function join(...chunks: Uint8Array[]): Uint8Array { return Uint8Array.from(Buffer.concat(chunks)) }
 
 describe('native streamed file decompression', () => {
+  it('does not read an already cancelled file', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const file = new SlicedFile(gzipSync(binary), 'cancelled.gz')
+    await expect(decompressNativeFile(file, 'auto', { ...context(), signal: controller.signal }))
+      .rejects.toMatchObject({ name: 'AbortError' })
+    expect(file.maxRead).toBe(0)
+  })
+
+  it('stops immediately when cancellation arrives from a progress callback', async () => {
+    const controller = new AbortController()
+    await expect(decompressNativeFile(new SlicedFile(gzipSync(binary), 'cancelled.gz'), 'auto', {
+      ...context(), signal: controller.signal, onProgress: () => controller.abort(),
+    })).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
   for (const algorithm of ['brotli', 'zstd', 'lzma', 'deflate', 'gzip', 'zip'] as const) {
     it(`round trips arbitrary bytes using ${algorithm} without buffering input`, async () => {
       expect(await decode(await compress(binary, algorithm), algorithm)).toEqual(binary)

@@ -8,8 +8,8 @@ import {
 } from '@/services/file-compression-types'
 import { DEFAULT_ENCODING, ENCODING_OPTIONS, type TextEncoding } from '@/services/text-compression-types'
 import {
-  MAX_EXPANDED_BYTES, MAX_TEXT_ARCHIVE_BYTES, MAX_UPLOAD_BYTES,
-  type FileOperationProgress, type ProcessedFile, type TextPart,
+  DEFAULT_FILE_CONCURRENCY, FILE_CONCURRENCY_OPTIONS, MAX_EXPANDED_BYTES, MAX_TEXT_ARCHIVE_BYTES, MAX_UPLOAD_BYTES,
+  type FileCompressionConcurrency, type FileOperationProgress, type ProcessedFile, type TextPart,
 } from '@/services/file-stream-types'
 
 type Action = 'compress' | 'decompress'
@@ -21,6 +21,7 @@ const archiveSource = ref<'upload' | 'paste'>('upload')
 const pastedArchive = ref('')
 const algorithm = ref<FileCompressionAlgorithm>(DEFAULT_FILE_ALGORITHM)
 const encoding = ref<TextEncoding>(DEFAULT_ENCODING)
+const concurrency = ref<FileCompressionConcurrency>(DEFAULT_FILE_CONCURRENCY)
 const decompressionAlgorithm = ref<FileDecompressionAlgorithm>('auto')
 const compressedResult = shallowRef<FileCompressionResult | null>(null)
 const decompressedResult = shallowRef<FileCompressionResult | null>(null)
@@ -83,7 +84,7 @@ function invalidate(action: Action) {
   }
 }
 
-watch([sourceFile, algorithm, encoding], () => invalidate('compress'), { flush: 'sync' })
+watch([sourceFile, algorithm, encoding, concurrency], () => invalidate('compress'), { flush: 'sync' })
 watch([archiveFile, archiveSource, pastedArchive, decompressionAlgorithm], () => invalidate('decompress'), { flush: 'sync' })
 onBeforeUnmount(() => {
   disposed = true
@@ -191,7 +192,7 @@ async function processFile(action: Action) {
   }
   try {
     const nextResult = action === 'compress'
-      ? await compressFile(file, algorithm.value, { ...options, encoding: encoding.value })
+      ? await compressFile(file, algorithm.value, { ...options, encoding: encoding.value, concurrency: concurrency.value })
       : await decompressFile(file, archiveSource.value === 'paste' ? 'auto' : decompressionAlgorithm.value, options)
     if (!isCurrent()) {
       releaseResult(nextResult)
@@ -304,7 +305,9 @@ function downloadFile(file: ProcessedFile, action: Action) {
         <div class="file-options">
           <label class="file-select"><span>压缩算法</span><NSelect v-model:value="algorithm" :options="compressionOptions" aria-label="文件压缩算法" /></label>
           <label class="file-select"><span>文本编码</span><NSelect v-model:value="encoding" :options="ENCODING_OPTIONS" aria-label="文件文本编码" /></label>
+          <label class="file-select"><span>压缩并发</span><NSelect v-model:value="concurrency" :options="FILE_CONCURRENCY_OPTIONS" aria-label="文件压缩并发" /></label>
         </div>
+        <p class="file-hint">多并发可加快分块压缩；更高并发会增加 CPU 和内存占用，速度取决于设备与算法。各并发使用相同纯文本格式和压缩参数。</p>
         <div class="file-actions">
           <NButton type="primary" :loading="compressing" :disabled="compressing || !sourceFile || sourceFile.size > MAX_UPLOAD_BYTES" @click="processFile('compress')">压缩文件</NButton>
           <NButton v-if="compressing" @click="cancel('compress')">取消压缩</NButton>

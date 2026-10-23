@@ -12,13 +12,15 @@ import {
   type FileDecompressionAlgorithm,
 } from './file-compression-types'
 import type { CompressionOutput, CompressionRequest, CompressionResponse } from './text-compression-rpc'
-import type { FileOperationProgress } from './file-stream-types'
+import { DEFAULT_FILE_CONCURRENCY, validateFileConcurrency } from './file-stream-types'
+import type { FileCompressionConcurrency, FileOperationProgress } from './file-stream-types'
 import { cleanupOperationStorage, releaseProcessedResult } from './file-output-storage'
 
 // A fresh worker keeps compression off the UI thread and releases codec memory
 // after each operation, including failed or excessively long operations.
 const OPERATION_TIMEOUT_MS = 120_000
 const FILE_IDLE_TIMEOUT_MS = 10 * 60_000
+const FILE_CANCEL_TIMEOUT_MS = 3_000
 
 export interface FileProcessingOptions {
   signal?: AbortSignal
@@ -27,6 +29,7 @@ export interface FileProcessingOptions {
 
 export interface FileCompressionOptions extends FileProcessingOptions {
   encoding?: TextEncoding
+  concurrency?: FileCompressionConcurrency
 }
 
 function runOperation<T extends CompressionOutput>(request: CompressionRequest, options: FileProcessingOptions = {}): Promise<T> {
@@ -47,11 +50,14 @@ function runOperation<T extends CompressionOutput>(request: CompressionRequest, 
       return
     }
 
-    let settled = false
+    let state: 'active' | 'cancelling' | 'closed' = 'active'
     let timeout: ReturnType<typeof setTimeout>
+    let cancelTimeout: ReturnType<typeof setTimeout> | undefined
     const cleanup = (removePartial = false) => {
-      settled = true
+      if (state === 'closed') return
+      state = 'closed'
       clearTimeout(timeout)
+      clearTimeout(cancelTimeout)
       options.signal?.removeEventListener('abort', abort)
       worker.terminate()
       if (removePartial && 'operationId' in request) {
@@ -59,23 +65,37 @@ function runOperation<T extends CompressionOutput>(request: CompressionRequest, 
       }
     }
 
-    const abort = () => {
-      if (settled) return
-      cleanup(true)
-      reject(new DOMException('已取消处理', 'AbortError'))
+    const stop = (error: Error) => {
+      if (state !== 'active') return
+      if (isFile && 'operationId' in request) {
+        // Give the coordinator a chance to terminate its child workers and
+        // release the OPFS writer before the outer worker is destroyed.
+        state = 'cancelling'
+        clearTimeout(timeout)
+        options.signal?.removeEventListener('abort', abort)
+        cancelTimeout = setTimeout(() => cleanup(true), FILE_CANCEL_TIMEOUT_MS)
+        try { worker.postMessage({ operation: 'cancel-file', operationId: request.operationId }) }
+        catch { cleanup(true) }
+      } else cleanup(true)
+      reject(error)
     }
+    const abort = () => stop(new DOMException('已取消处理', 'AbortError'))
     const resetTimeout = () => {
       clearTimeout(timeout)
       timeout = setTimeout(() => {
-        cleanup(true)
-        reject(new Error(isFile ? '长时间没有处理进度，请重试或选择更快的算法' : '处理超时，请缩短文本或选择更快的压缩算法'))
+        stop(new Error(isFile ? '长时间没有处理进度，请重试或选择更快的算法' : '处理超时，请缩短文本或选择更快的压缩算法'))
       }, isFile ? FILE_IDLE_TIMEOUT_MS : OPERATION_TIMEOUT_MS)
     }
     resetTimeout()
     options.signal?.addEventListener('abort', abort, { once: true })
 
     worker.onmessage = (event: MessageEvent<CompressionResponse<T>>) => {
-      if (settled) return
+      if (state === 'closed') return
+      if (state === 'cancelling') {
+        if (('type' in event.data && event.data.type === 'cancelled' &&
+          'operationId' in request && event.data.operationId === request.operationId) || 'success' in event.data) cleanup(true)
+        return
+      }
       if ('type' in event.data && event.data.type === 'progress') {
         resetTimeout()
         try { options.onProgress?.(event.data.progress) } catch { /* UI callbacks cannot interrupt processing. */ }
@@ -91,14 +111,16 @@ function runOperation<T extends CompressionOutput>(request: CompressionRequest, 
     }
 
     worker.onerror = (event) => {
-      if (settled) return
+      if (state === 'closed') return
       event.preventDefault()
+      if (state === 'cancelling') { cleanup(true); return }
       cleanup(true)
       reject(new Error(`${isFile ? '文件' : '文本'}压缩组件加载或执行失败，请重新加载工具后重试`))
     }
 
     worker.onmessageerror = () => {
-      if (settled) return
+      if (state === 'closed') return
+      if (state === 'cancelling') { cleanup(true); return }
       cleanup(true)
       reject(new Error('无法读取处理结果，请重试'))
     }
@@ -129,9 +151,13 @@ export function compressFile(
   algorithm: FileCompressionAlgorithm = DEFAULT_FILE_ALGORITHM,
   options: FileCompressionOptions = {},
 ): Promise<FileCompressionResult> {
+  const concurrency = options.concurrency ?? DEFAULT_FILE_CONCURRENCY
+  try { validateFileConcurrency(concurrency) }
+  catch (error) { return Promise.reject(error) }
   return runOperation({
     operation: 'compress-file', file, algorithm,
     encoding: options.encoding ?? DEFAULT_ENCODING,
+    concurrency,
     operationId: crypto.randomUUID(),
   }, options)
 }

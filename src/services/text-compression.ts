@@ -84,7 +84,8 @@ function createResult(text: string, originalText: string, compressedText: string
   }
 }
 
-async function runLzma(action: 1 | 2, bytes: Uint8Array): Promise<Uint8Array> {
+async function runLzma(action: 1 | 2, bytes: Uint8Array, timeoutMs = 120_000): Promise<Uint8Array> {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 32 * 60_000) throw new Error('LZMA 超时设置无效')
   // The upstream LZMA file installs a global onmessage handler. Keep it in its
   // own classic worker so that it cannot replace this tool's worker protocol.
   const { default: workerUrl } = await import('lzma/src/lzma_worker.js?url')
@@ -96,7 +97,7 @@ async function runLzma(action: 1 | 2, bytes: Uint8Array): Promise<Uint8Array> {
       if (error) reject(error)
       else resolve(result!)
     }
-    const timeout = setTimeout(() => finish(new Error('LZMA 处理超时，请缩短文本后重试')), 120000)
+    const timeout = setTimeout(() => finish(new Error('LZMA 处理超时，请缩短文本或降低并发后重试')), timeoutMs)
     worker.onerror = () => finish(new Error('LZMA 加载或运行失败'))
     worker.onmessage = ({ data }) => {
       if (data?.action !== action || data.cbn !== 1) return
@@ -113,11 +114,11 @@ async function runLzma(action: 1 | 2, bytes: Uint8Array): Promise<Uint8Array> {
   })
 }
 
-async function compressBytes(input: Uint8Array, text: string, algorithm: CompressionAlgorithm): Promise<Uint8Array> {
+async function compressBytes(input: Uint8Array, text: string, algorithm: CompressionAlgorithm, lzmaTimeoutMs?: number): Promise<Uint8Array> {
   switch (algorithm) {
     case 'brotli': return (await loadBrotli()).compress(input, { quality: 11 })
     case 'zstd': return (await loadZstd()).compress(input, 19)
-    case 'lzma': return runLzma(1, input)
+    case 'lzma': return runLzma(1, input, lzmaTimeoutMs)
     case 'deflate': return deflateSync(input, { level: 9 })
     case 'gzip': return gzipSync(input, { level: 9, mtime: 0 })
     case 'lz-string': return compressToUint8Array(text)
@@ -126,8 +127,9 @@ async function compressBytes(input: Uint8Array, text: string, algorithm: Compres
 
 /** Raw standard-format compression, shared with the binary file tool. */
 export async function compressBinaryBytes(input: Uint8Array,
-  algorithm: Exclude<CompressionAlgorithm, 'lz-string'>): Promise<Uint8Array> {
-  return compressBytes(input, '', algorithm)
+  algorithm: Exclude<CompressionAlgorithm, 'lz-string'>,
+  options: { lzmaTimeoutMs?: number } = {}): Promise<Uint8Array> {
+  return compressBytes(input, '', algorithm, options.lzmaTimeoutMs)
 }
 
 async function decompressBrotli(input: Uint8Array, expected: number): Promise<Uint8Array> {

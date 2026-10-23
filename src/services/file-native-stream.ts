@@ -46,7 +46,9 @@ async function read(blob: Blob, start: number, length: number): Promise<Uint8Arr
   return bytes
 }
 function report(context: FileOperationContext, completed: number, total: number): void {
+  context.signal?.throwIfAborted()
   context.onProgress?.({ stage: '正在解压文件', completed, total })
+  context.signal?.throwIfAborted()
 }
 function lzmaSize(header: Uint8Array): number | null {
   if (header.length < 18 || header[0] >= 225 || header[13] !== 0) throw new Error(CORRUPTED)
@@ -272,10 +274,12 @@ async function lzmaFile(file: File, write: Write, context: FileOperationContext)
       if (stopped) return
       stopped = true
       clearTimeout(timeout)
+      context.signal?.removeEventListener('abort', abort)
       worker.terminate()
       if (error) reject(error)
       else resolve()
     }
+    const abort = () => finish(new DOMException('已取消处理', 'AbortError'))
     const touch = () => {
       clearTimeout(timeout)
       timeout = setTimeout(() => finish(new Error('LZMA 处理超时')), 90000)
@@ -298,6 +302,8 @@ async function lzmaFile(file: File, write: Write, context: FileOperationContext)
       } catch (error) { finish(error instanceof Error ? error : new Error(CORRUPTED)) }
     }
     touch()
+    context.signal?.addEventListener('abort', abort, { once: true })
+    if (context.signal?.aborted) { abort(); return }
     worker.postMessage({ type: 'start', file, limit: MAX_EXPANDED_BYTES })
   })
 }
@@ -368,6 +374,7 @@ async function zipEntries(file: File): Promise<ZipEntry[]> {
 /** Decode native archives with bounded codec inputs and disk-backed outputs. */
 export async function decompressNativeFile(file: File, algorithm: FileDecompressionAlgorithm,
   context: FileOperationContext): Promise<FileCompressionResult> {
+  context.signal?.throwIfAborted()
   if (!file.size) throw new Error(CORRUPTED)
   if (file.size > MAX_TEXT_ARCHIVE_BYTES) throw new Error('上传的压缩文件不能超过 3 GiB')
   const selected = algorithm === 'auto' ? await detect(file) : algorithm
@@ -384,6 +391,7 @@ export async function decompressNativeFile(file: File, algorithm: FileDecompress
       let size = 0
       let crc = 0xffffffff
       const write: Write = async (bytes) => {
+        context.signal?.throwIfAborted()
         checkSize(total + bytes.length)
         if (entry.original >= 0 && size + bytes.length > entry.original) throw new Error(CORRUPTED)
         crc = selected === 'zip' ? crcUpdate(crc, bytes) : crc
@@ -413,6 +421,7 @@ export async function decompressNativeFile(file: File, algorithm: FileDecompress
     return { algorithm: selected, files: [], outputs, originalBytes: total, compressedBytes: file.size, byteRatio: total ? file.size / total : null }
   } catch (error) {
     await cleanupOperationStorage(context.operationId)
+    context.signal?.throwIfAborted()
     if (error instanceof Error && /不能|超过|不支持|超时|加载|运行|校验|空间|存储/.test(error.message)) throw error
     throw new Error(CORRUPTED)
   }
