@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { NAlert, NButton, NCard, NSelect, NText } from 'naive-ui'
+import { ALGORITHM_GUIDANCE, renderAlgorithmLabel } from './algorithm-guidance'
 import { compressFile, decompressFile, releaseFileResult } from '@/services/text-compression-client'
 import {
   DEFAULT_FILE_ALGORITHM, FILE_ALGORITHM_OPTIONS, FILE_DECOMPRESSION_OPTIONS, MAX_ARCHIVE_ENTRIES,
@@ -303,10 +304,11 @@ function downloadFile(file: ProcessedFile, action: Action) {
         <p class="file-hint">支持文本、图片、PDF 等任意文件，最大 {{ formatBytes(MAX_UPLOAD_BYTES) }}。大文件分块处理，请预留足够的本地磁盘空间。</p>
         <div v-if="sourceFile" class="file-selection" data-testid="source-file-info"><strong>{{ sourceFile.name }}</strong><span>{{ formatBytes(sourceFile.size) }}</span></div>
         <div class="file-options">
-          <label class="file-select"><span>压缩算法</span><NSelect v-model:value="algorithm" :options="compressionOptions" aria-label="文件压缩算法" /></label>
+          <label class="file-select"><span>压缩算法</span><NSelect v-model:value="algorithm" :options="compressionOptions" :render-label="renderAlgorithmLabel" :consistent-menu-width="false" aria-label="文件压缩算法" aria-describedby="file-algorithm-guidance" /></label>
           <label class="file-select"><span>文本编码</span><NSelect v-model:value="encoding" :options="ENCODING_OPTIONS" aria-label="文件文本编码" /></label>
           <label class="file-select"><span>压缩并发</span><NSelect v-model:value="concurrency" :options="FILE_CONCURRENCY_OPTIONS" aria-label="文件压缩并发" /></label>
         </div>
+        <p id="file-algorithm-guidance" class="file-hint" aria-live="polite">选用建议：{{ ALGORITHM_GUIDANCE[algorithm].description }}</p>
         <p class="file-hint">多并发可加快分块压缩；更高并发会增加 CPU 和内存占用，速度取决于设备与算法。各并发使用相同纯文本格式和压缩参数。</p>
         <div class="file-actions">
           <NButton type="primary" :loading="compressing" :disabled="compressing || !sourceFile || sourceFile.size > MAX_UPLOAD_BYTES" @click="processFile('compress')">压缩文件</NButton>

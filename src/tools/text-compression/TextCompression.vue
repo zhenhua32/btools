@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { NAlert, NButton, NCard, NInput, NSelect, NSpace, NText } from 'naive-ui'
 import FileCompression from './FileCompression.vue'
+import { ALGORITHM_GUIDANCE, renderAlgorithmLabel } from './algorithm-guidance'
 import { compressText, decompressText } from '@/services/text-compression-client'
 import {
   ALGORITHM_OPTIONS,
@@ -183,7 +184,7 @@ function clearAll() {
     <div class="compression-toolbar">
       <label class="compression-select">
         <span>压缩算法</span>
-        <NSelect v-model:value="algorithm" :options="ALGORITHM_OPTIONS" :disabled="busy" aria-label="压缩算法" />
+        <NSelect v-model:value="algorithm" :options="ALGORITHM_OPTIONS" :render-label="renderAlgorithmLabel" :consistent-menu-width="false" :disabled="busy" aria-label="压缩算法" aria-describedby="text-algorithm-guidance" />
       </label>
       <label class="compression-select">
         <span>文本编码</span>
@@ -196,6 +197,7 @@ function clearAll() {
       </NSpace>
     </div>
 
+    <p id="text-algorithm-guidance" class="compression-hint" aria-live="polite">选用建议：{{ ALGORITHM_GUIDANCE[algorithm].description }}</p>
     <p class="compression-hint">Base32768 / Base65536 可减少字符数，Base64url 适合链接或仅支持 ASCII 的渠道。字符更少不一定代表 UTF-8 字节更少；短文本压缩后可能膨胀。</p>
 
     <NAlert v-if="errorMessage" type="error" closable class="compression-alert" @close="errorMessage = ''">{{ errorMessage }}</NAlert>
