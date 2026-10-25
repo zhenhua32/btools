@@ -19,24 +19,34 @@ class ScheduledWorker {
   static all: ScheduledWorker[] = []
   static automatic = false
   static dispatched: number[] = []
+  static running = 0
+  static peakRunning = 0
   onmessage: ((event: MessageEvent<CompressionChunkResponse>) => void) | null = null
   onerror: ((event: ErrorEvent) => void) | null = null
   onmessageerror: (() => void) | null = null
   request?: CompressionChunkRequest
   terminated = false
+  pending = false
   constructor() { ScheduledWorker.all.push(this) }
   postMessage(request: CompressionChunkRequest) {
     this.request = request
+    this.pending = true
+    ScheduledWorker.running++
+    ScheduledWorker.peakRunning = Math.max(ScheduledWorker.running, ScheduledWorker.peakRunning)
     ScheduledWorker.dispatched.push(request.index)
-    if (ScheduledWorker.automatic) queueMicrotask(() => this.complete())
+    if (ScheduledWorker.automatic) queueMicrotask(() => { if (this.request?.index === request.index) this.complete() })
   }
-  complete() {
+  complete(bytes?: Uint8Array<ArrayBuffer>) {
+    if (!this.pending || this.terminated) return
+    this.pending = false
+    ScheduledWorker.running--
     const index = this.request!.index
     this.onmessage?.({ data: { success: true, result: {
-      index, bytes: new TextEncoder().encode(`C:${index.toString(36)}\n`), characters: 3 + index.toString(36).length,
+      index, bytes: bytes ?? new TextEncoder().encode(`C:${index.toString(36)}\n`), characters: 3 + index.toString(36).length,
+      sourceCrc: 0, sourceBytes: this.request!.bytes.byteLength,
     } } } as MessageEvent<CompressionChunkResponse>)
   }
-  terminate() { this.terminated = true }
+  terminate() { this.terminated = true; if (this.pending) ScheduledWorker.running--; this.pending = false }
 }
 const block = new Uint8Array(FILE_CHUNK_BYTES)
 function virtualFile(size: number) {
@@ -47,25 +57,29 @@ function virtualFile(size: number) {
 async function tick() { for (let index = 0; index < 24; index++) await Promise.resolve() }
 beforeEach(() => {
   ScheduledWorker.all = []; ScheduledWorker.dispatched = []; ScheduledWorker.automatic = false
+  ScheduledWorker.running = 0; ScheduledWorker.peakRunning = 0
   vi.stubGlobal('Worker', ScheduledWorker)
 })
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers() })
 
 describe('ordered bounded compression scheduling', () => {
-  it('keeps running plus out-of-order records bounded when the first block is slow', async () => {
-    const input = virtualFile(FILE_CHUNK_BYTES * 6)
+  it('refills idle slots immediately, then stops at 2C unread/unwritten blocks when the first block is slow', async () => {
+    const input = virtualFile(FILE_CHUNK_BYTES * 12)
     const job = compressFileToText(input, 'gzip', 'base32768', { operationId: 'scheduler', concurrency: 4 })
     await tick()
     expect(ScheduledWorker.dispatched).toEqual([0, 1, 2, 3])
-    for (const worker of ScheduledWorker.all.slice(1)) worker.complete()
-    await tick()
-    expect(ScheduledWorker.dispatched).toEqual([0, 1, 2, 3])
-    expect(input.slice).toHaveBeenCalledTimes(4)
+    for (let round = 0; round < 4; round++) {
+      for (const worker of ScheduledWorker.all.slice(1)) worker.complete()
+      await tick()
+    }
+    expect(ScheduledWorker.dispatched).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+    expect(input.slice).toHaveBeenCalledTimes(8)
+    expect(ScheduledWorker.peakRunning).toBeLessThanOrEqual(4)
     ScheduledWorker.automatic = true
     ScheduledWorker.all[0].complete()
     const output = (await job).textOutput!
-    expect((await output.blob.text()).split('\n').slice(1, -2)).toEqual(['C:0', 'C:1', 'C:2', 'C:3', 'C:4', 'C:5'])
-    expect(output.parts).toHaveLength(6)
+    expect((await output.blob.text()).split('\n').slice(1, -2)).toEqual(Array.from({ length: 12 }, (_, index) => `C:${index.toString(36)}`))
+    expect(output.parts).toHaveLength(12)
     expect(ScheduledWorker.all.every((worker) => worker.terminated)).toBe(true)
   })
 
@@ -79,6 +93,7 @@ describe('ordered bounded compression scheduling', () => {
     expect(input.slice).toHaveBeenLastCalledWith(MAX_UPLOAD_BYTES - FILE_CHUNK_BYTES, MAX_UPLOAD_BYTES)
     expect(output.parts).toHaveLength(256)
     expect(output.parts.reduce((sum, part) => sum + part.size, 0)).toBe(output.blob.size)
+    expect(ScheduledWorker.peakRunning).toBeLessThanOrEqual(concurrency)
     expect(ScheduledWorker.all.every((worker) => worker.terminated)).toBe(true)
   })
 
@@ -131,7 +146,80 @@ describe('ordered bounded compression scheduling', () => {
     await expect(compressFileToText(input, 'gzip', 'base32768', { operationId: 'scheduler', concurrency: 4 })).rejects.toThrow('disk full')
     expect(abort).toHaveBeenCalledOnce()
     expect(ScheduledWorker.all.every((worker) => worker.terminated)).toBe(true)
-    expect(input.slice).toHaveBeenCalledTimes(4)
+    // Completed slots can start one source read before the failed write is observed.
+    const reads = vi.mocked(input.slice).mock.calls.length
+    expect(reads).toBeLessThanOrEqual(8)
+    await tick()
+    expect(input.slice).toHaveBeenCalledTimes(reads)
+  })
+
+  it.each(['cancel', 'codec error'] as const)('awaits the only source read and never dispatches it after %s', async (reason) => {
+    let releaseRead!: (buffer: ArrayBuffer) => void
+    let readInFlight = false
+    const input = virtualFile(MAX_UPLOAD_BYTES)
+    vi.mocked(input.slice).mockImplementation((start, end) => ({ arrayBuffer: async () => {
+      if (start === FILE_CHUNK_BYTES * 4) {
+        readInFlight = true
+        return new Promise<ArrayBuffer>((resolve) => { releaseRead = resolve })
+      }
+      return block.buffer.slice(0, end! - start!)
+    } } as Blob))
+    const controller = new AbortController()
+    const job = compressFileToText(input, 'gzip', 'base32768', { operationId: 'scheduler', concurrency: 4, signal: controller.signal })
+    const rejection = reason === 'cancel' ? expect(job).rejects.toMatchObject({ name: 'AbortError' }) : expect(job).rejects.toThrow('codec failed')
+    let finished = false
+    void job.then(() => { finished = true }, () => { finished = true })
+    await tick()
+    ScheduledWorker.all[1].complete()
+    await tick()
+    expect(readInFlight).toBe(true)
+    expect(ScheduledWorker.dispatched).toEqual([0, 1, 2, 3])
+    if (reason === 'cancel') controller.abort()
+    else ScheduledWorker.all[2].onmessage?.({ data: { success: false, error: 'codec failed' } } as MessageEvent<CompressionChunkResponse>)
+    await tick()
+    expect(ScheduledWorker.all.every((worker) => worker.terminated)).toBe(true)
+    expect(finished).toBe(false)
+    releaseRead(block.buffer)
+    await rejection
+    await tick()
+    expect(ScheduledWorker.dispatched).toEqual([0, 1, 2, 3])
+    expect(input.slice).toHaveBeenCalledTimes(5)
+  })
+
+  it('terminates earlier jobs and aborts the output when a refill read fails', async () => {
+    const input = virtualFile(MAX_UPLOAD_BYTES)
+    vi.mocked(input.slice).mockImplementation((start, end) => ({ arrayBuffer: async () => {
+      if (start === FILE_CHUNK_BYTES * 4) throw new Error('read denied')
+      return block.buffer.slice(0, end! - start!)
+    } } as Blob))
+    const job = compressFileToText(input, 'gzip', 'base32768', { operationId: 'scheduler', concurrency: 4 })
+    const rejection = expect(job).rejects.toThrow('read denied')
+    await tick()
+    ScheduledWorker.all[1].complete()
+    await rejection
+    expect(ScheduledWorker.all.every((worker) => worker.terminated)).toBe(true)
+    expect(ScheduledWorker.dispatched).toEqual([0, 1, 2, 3])
+    expect(input.slice).toHaveBeenCalledTimes(5)
+  })
+
+  it('applies byte backpressure to large out-of-order records before the 2C window fills', async () => {
+    const controller = new AbortController()
+    const input = virtualFile(FILE_CHUNK_BYTES * 20)
+    const job = compressFileToText(input, 'gzip', 'base32768', { operationId: 'scheduler', concurrency: 4, signal: controller.signal })
+    const rejection = expect(job).rejects.toMatchObject({ name: 'AbortError' })
+    await tick()
+    for (const index of [1, 2, 3]) {
+      ScheduledWorker.all.find((worker) => worker.request!.index === index)!.complete(new Uint8Array(22 * 1024 ** 2))
+      await tick()
+    }
+    // Three completed 22 MiB records cross the soft 64 MiB threshold. The first
+    // two completed slots were refilled; no new read starts after the third.
+    expect(ScheduledWorker.dispatched).toEqual([0, 1, 2, 3, 4, 5])
+    expect(input.slice).toHaveBeenCalledTimes(6)
+    expect(ScheduledWorker.peakRunning).toBeLessThanOrEqual(4)
+    controller.abort()
+    await rejection
+    expect(ScheduledWorker.all.every((worker) => worker.terminated)).toBe(true)
   })
 
   it('scales the LZMA chunk budget, reports real completed bytes while busy and clears its heartbeat on cancel', async () => {

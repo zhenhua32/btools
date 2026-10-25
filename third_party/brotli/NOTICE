@@ -1,0 +1,22 @@
+BTools file Brotli encoder
+
+The C ABI wrapper in src/lib.rs adapts the one-shot compression call from
+httptoolkit/brotli-wasm v3.0.1 (Tim Perry / HTTP Toolkit, Apache-2.0):
+https://github.com/httptoolkit/brotli-wasm/blob/v3.0.1/src/lib.rs
+
+BTools modifications: a small C ABI with owned input/result allocations,
+a 4 MiB input bound, and an opt-level=3/LTO build. The Brotli encoder, default
+parameters and quality=11 call are unchanged. No decompressor is included.
+
+The bundled binary contains these pinned Rust dependencies:
+  brotli 5.0.0              BSD-3-Clause
+  brotli-decompressor 4.0.0 BSD-3-Clause
+  alloc-stdlib 0.2.1        BSD-3-Clause
+  alloc-no-stdlib 2.0.3     BSD-3-Clause
+All four are from the Dropbox Rust Brotli/allocator projects. Their shared
+Copyright (c) 2016 Dropbox, Inc. notice and license are reproduced in
+LICENSE-BSD-3-CLAUSE. The Rust standard library is available under Apache-2.0
+or MIT; this distribution uses the Apache-2.0 option.
+
+Full licenses: LICENSE-APACHE-2.0 and LICENSE-BSD-3-CLAUSE.
+The extension ships the same notices in third-party-notices/brotli-file-encoder.txt.

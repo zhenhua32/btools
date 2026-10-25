@@ -35,6 +35,7 @@ describe('compression worker file requests', () => {
   const scope = {
     onmessage: null as ((event: MessageEvent<CompressionWorkerRequest>) => Promise<void>) | null,
     postMessage: vi.fn(),
+    close: vi.fn(),
   }
 
   beforeEach(async () => {
@@ -71,6 +72,8 @@ describe('compression worker file requests', () => {
       { success: true, result }, [result.files[0]!.bytes.buffer],
     )
     expect(compressTextMock).not.toHaveBeenCalled()
+    expect(scope.close).toHaveBeenCalledOnce()
+    expect(scope.close.mock.invocationCallOrder[0]).toBeGreaterThan(scope.postMessage.mock.invocationCallOrder[0]!)
   })
 
   it('passes auto detection through and returns each extracted file buffer', async () => {
@@ -140,12 +143,41 @@ describe('compression worker file requests', () => {
     }))
     await scope.onmessage!(new MessageEvent('message', { data: { operation: 'cancel-file', operationId: 'other-pool' } }))
     expect(signal!.aborted).toBe(false)
+    expect(scope.close).not.toHaveBeenCalled()
     await scope.onmessage!(new MessageEvent('message', { data: { operation: 'cancel-file', operationId: 'cancel-pool' } }))
     expect(signal!.aborted).toBe(true)
     await pending
     expect(cleanupMock).toHaveBeenCalledWith('cancel-pool')
     expect(scope.postMessage).toHaveBeenLastCalledWith({ type: 'cancelled', operationId: 'cancel-pool' })
     expect(scope.postMessage.mock.calls.some(([message]) => message.success === true)).toBe(false)
+    expect(scope.close).toHaveBeenCalledOnce()
+    expect(scope.close.mock.invocationCallOrder[0]).toBeGreaterThan(scope.postMessage.mock.invocationCallOrder[scope.postMessage.mock.invocationCallOrder.length - 1]!)
+  })
+
+  it('waits for failed-file cleanup and the error response before closing', async () => {
+    let finishCleanup!: () => void
+    cleanupMock.mockImplementationOnce(() => new Promise<void>((resolve) => { finishCleanup = resolve }))
+    compressFileMock.mockRejectedValueOnce(new Error('codec failed'))
+    const pending = scope.onmessage!(new MessageEvent('message', { data: {
+      operation: 'compress-file', file: new File(['data'], 'data.bin'), algorithm: 'brotli', encoding: 'base32768', concurrency: 4, operationId: 'close-after-cleanup',
+    } }))
+    for (let tick = 0; tick < 8; tick++) await Promise.resolve()
+    expect(cleanupMock).toHaveBeenCalledWith('close-after-cleanup')
+    expect(scope.close).not.toHaveBeenCalled()
+    expect(scope.postMessage).not.toHaveBeenCalled()
+    finishCleanup()
+    await pending
+    expect(scope.postMessage).toHaveBeenCalledWith({ success: false, error: 'codec failed' })
+    expect(scope.close).toHaveBeenCalledOnce()
+    expect(scope.close.mock.invocationCallOrder[0]).toBeGreaterThan(scope.postMessage.mock.invocationCallOrder[0]!)
+  })
+
+  it('closes a one-shot text coordinator after its response', async () => {
+    compressTextMock.mockResolvedValueOnce({ text: 'encoded' })
+    await scope.onmessage!(new MessageEvent('message', { data: { operation: 'compress', input: 'data', algorithm: 'brotli', encoding: 'base32768' } }))
+    expect(scope.postMessage).toHaveBeenCalledWith({ success: true, result: { text: 'encoded' } }, [])
+    expect(scope.close).toHaveBeenCalledOnce()
+    expect(scope.close.mock.invocationCallOrder[0]).toBeGreaterThan(scope.postMessage.mock.invocationCallOrder[0]!)
   })
 
   it('rejects malformed concurrency before creating child work', async () => {

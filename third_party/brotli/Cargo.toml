@@ -1,0 +1,25 @@
+[package]
+name = "btools-brotli-file-encoder"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+
+[lib]
+name = "btools_brotli_file_encoder"
+crate-type = ["cdylib"]
+
+[dependencies]
+# Exact encoder/dependencies used by brotli-wasm v3.0.1; retain Cargo.lock.
+brotli = "=5.0.0"
+
+[profile.release]
+lto = true
+opt-level = 3
+panic = "abort"
+
+[profile.size]
+inherits = "release"
+opt-level = "s"
+
+[workspace]

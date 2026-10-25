@@ -1,0 +1,7 @@
+{
+  "rustc": "rustc 1.85.1 (4eb161250 2025-03-15)",
+  "target": "wasm32-unknown-unknown",
+  "profile": "release (opt-level=3, lto=true, panic=abort)",
+  "wasmSha256": "70618112e202ac5a4c3c4400aa45f4783e6f50268b7478e793fd27b60f29138a",
+  "cargoLockSha256": "e8a8521dc6ad0433fe616672e5847b8236325c7334cb9670d16d3d549a8ca7b8"
+}

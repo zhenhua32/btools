@@ -1,0 +1,35 @@
+# Version/checksum entries copied from official brotli-wasm v3.0.1 Cargo.lock.
+# The root package entry reflects this prototype; unused JS binding dependencies are omitted.
+version = 3
+
+[[package]]
+name = "alloc-no-stdlib"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35ef4730490ad1c4eae5c4325b2a95f521d023e5c885853ff7aca0a6a1631db3"
+
+[[package]]
+name = "alloc-stdlib"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "697ed7edc0f1711de49ce108c541623a0af97c6c60b2f6e2b65229847ac843c2"
+dependencies = ["alloc-no-stdlib"]
+
+[[package]]
+name = "brotli"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19483b140a7ac7174d34b5a581b406c64f84da5409d3e09cf4fff604f9270e67"
+dependencies = ["alloc-no-stdlib", "alloc-stdlib", "brotli-decompressor"]
+
+[[package]]
+name = "brotli-decompressor"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6221fe77a248b9117d431ad93761222e1cf8ff282d9d1d5d9f53d6299a1cf76"
+dependencies = ["alloc-no-stdlib", "alloc-stdlib"]
+
+[[package]]
+name = "btools-brotli-file-encoder"
+version = "0.1.0"
+dependencies = ["brotli"]

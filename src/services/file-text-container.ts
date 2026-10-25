@@ -1,7 +1,8 @@
 import { decompressFile } from './file-compression'
 import { characters, checksum, crcHex, updateCrc } from './file-compression-chunk'
-import type { CompressionChunkResult } from './file-compression-chunk'
+import { combineCrc32 } from './file-compression-crc'
 import { checkCompressionAbort, FileCompressionPool } from './file-compression-pool'
+import { orderedCompressionChunks } from './file-compression-scheduler'
 import { FILE_ALGORITHM_OPTIONS, MAX_ARCHIVE_BYTES } from './file-compression-types'
 import type { FileCompressionAlgorithm, FileCompressionResult } from './file-compression-types'
 import { createOutputSink } from './file-output-storage'
@@ -108,30 +109,22 @@ export async function compressFileToText(file: Blob & { name?: string },
       if (!context.signal?.aborted) context.onProgress?.({ stage: '正在压缩并编码', completed, total: file.size })
     }, 10000)
     await sink.write(encoder.encode(header))
-    type Outcome = { result: CompressionChunkResult } | { error: unknown }
-    const pending = new Map<number, Promise<Outcome>>()
-    let nextRead = 0
-    const dispatch = async () => {
+    const readChunk = async (index: number) => {
       checkCompressionAbort(context.signal)
-      const index = nextRead++
       const offset = index * FILE_CHUNK_BYTES
       const bytes = new Uint8Array(await file.slice(offset, Math.min(offset + FILE_CHUNK_BYTES, file.size)).arrayBuffer())
       checkCompressionAbort(context.signal)
       if (bytes.length !== Math.min(FILE_CHUNK_BYTES, file.size - offset)) throw new Error('文件读取不完整')
-      // Read source bytes in order, before transferring their buffers into the child workers.
-      crc = updateCrc(crc, bytes)
-      // Handle rejection immediately, even when an earlier block is still being compressed.
-      pending.set(index, pool!.run({ index, bytes, algorithm, encoding,
-        lzmaTimeoutMs: algorithm === 'lzma' ? 120000 * concurrency : undefined }).then(
-        (result): Outcome => ({ result }), (error): Outcome => ({ error })))
+      return { index, bytes, algorithm, encoding,
+        lzmaTimeoutMs: algorithm === 'lzma' ? 120000 * concurrency : undefined }
     }
-    for (let index = 0; index < Math.min(count, concurrency); index++) await dispatch()
-    for (let index = 0; index < count; index++) {
-      const outcome = await pending.get(index)!
-      pending.delete(index)
+    for await (const result of orderedCompressionChunks({ count, concurrency, signal: context.signal,
+      read: readChunk, run: (request) => pool!.run(request), terminate: (error) => pool?.terminate(error) })) {
       checkCompressionAbort(context.signal)
-      if ('error' in outcome) throw outcome.error
-      const { bytes: recordBytes, characters: recordCharacters } = outcome.result
+      const { index, bytes: recordBytes, characters: recordCharacters, sourceCrc, sourceBytes } = result
+      // Workers already scan their own input once for C records. Combining those
+      // finalized CRC32 values retains the exact footer without a serial re-scan.
+      crc = combineCrc32((crc ^ 0xffffffff) >>> 0, sourceCrc, sourceBytes) ^ 0xffffffff
       const start = index ? sink.size : 0
       await sink.write(recordBytes)
       checkCompressionAbort(context.signal)
@@ -140,9 +133,6 @@ export async function compressFileToText(file: Blob & { name?: string },
       textCharacters += recordCharacters
       completed = Math.min((index + 1) * FILE_CHUNK_BYTES, file.size)
       context.onProgress?.({ stage: '正在压缩并编码', completed, total: file.size })
-      // Running tasks + completed out-of-order records never exceed concurrency. A slow first
-      // block therefore cannot make the rest of a 1 GiB file accumulate in memory.
-      if (nextRead < count) await dispatch()
     }
     const footer = `E:${count.toString(36)}:${file.size.toString(36)}:${crcHex(crc)}\n`
     const footerBytes = encoder.encode(footer)

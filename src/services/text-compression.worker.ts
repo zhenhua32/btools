@@ -8,6 +8,7 @@ import type { CompressionWorkerRequest, CompressionResponse, CompressionOutput }
 const workerScope = self as unknown as {
   onmessage: ((event: MessageEvent<CompressionWorkerRequest>) => void) | null
   postMessage: (message: CompressionResponse, transfer?: Transferable[]) => void
+  close: () => void
 }
 const fileOperations = new Map<string, AbortController>()
 
@@ -75,5 +76,9 @@ workerScope.onmessage = async (event) => {
     }
   } finally {
     if ('operationId' in request && fileOperations.get(request.operationId) === controller) fileOperations.delete(request.operationId)
+    // Each client creates a fresh coordinator for one operation. Close its event
+    // loop after cleanup and the final response; the client also terminates it.
+    // A cancel message must leave the active operation alive until cleanup ends.
+    if (!fileOperations.size) workerScope.close()
   }
 }
